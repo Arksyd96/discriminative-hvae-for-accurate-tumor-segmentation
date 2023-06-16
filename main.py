@@ -7,8 +7,8 @@ from pytorch_lightning.loggers import wandb as wandb_logger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from modules.preprocessing import BRATSDataModule
-from modules.autoencoders.gaussian_autoencoder import HamiltonianAutoencoder
-from modules.loggers import ImageReconstructionLogger
+from modules.loggers import ImageSampler
+from modules.autoencoders import HamiltonianAutoencoder
 
 os.environ['WANDB_API_KEY'] = 'bdc8857f9d6f7010cff35bcdc0ae9413e05c75e1'
 
@@ -48,9 +48,8 @@ if __name__ == "__main__":
     # data module
     datamodule = BRATSDataModule(**cfg.data)
         
-    image_reconstruction_callback = ImageReconstructionLogger(
-        modalities=['FLAIR', 'SEG'],
-        n_samples=5
+    image_sampler_logger = ImageSampler(
+        n_samples=5, label='Image sampling ... - {epoch}'
     )
     
     # callbacks
@@ -66,12 +65,11 @@ if __name__ == "__main__":
         # devices=4,
         # num_nodes=1,
         accelerator='gpu',
-        precision=16,
-        max_epochs=50,
+        precision=32,
+        max_epochs=30,
         log_every_n_steps=1,
-        check_val_every_n_epoch=5,
         enable_progress_bar=True,
-        callbacks=[checkpoint_callback, image_reconstruction_callback]
+        callbacks=[checkpoint_callback, image_sampler_logger]
     )
 
     trainer.fit(model=model, datamodule=datamodule)

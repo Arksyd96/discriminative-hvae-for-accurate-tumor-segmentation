@@ -1,65 +1,189 @@
+from typing import Any
 import numpy as np
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import grad
+import pytorch_lightning as pl
 
-from .base import BaseVAE
+from .base import (
+    TimePositionalEmbedding, EncodingBlock, DecodingBlock,
+    ResidualBlock, SelfAttention
+)
+from .lpips import LPIPSWithDiscriminator
+
+class Encoder(nn.Module):
+    def __init__(
+        self, 
+        in_channels, 
+        z_channels=4, 
+        pemb_dim=None, 
+        num_channels=128, 
+        channels_mult=[1, 2, 4, 4], 
+        num_res_blocks=2, 
+        attn=None
+    ) -> None:
+        super().__init__()
+        if attn is not None:
+            assert channels_mult.__len__() == attn.__len__(), 'channels_mult and attn must have the same length'
+            self.attn = attn
+        else:
+            self.attn = [False] * channels_mult.__len__()
+
+        self.z_channels = z_channels
+        self.channels_mult = [1, *channels_mult]
+        
+        # architecture modules
+        self.in_conv = nn.Conv2d(in_channels, num_channels, kernel_size=3, padding='same')
+        self.enocoder = nn.ModuleList([
+            EncodingBlock(
+                in_channels=num_channels * self.channels_mult[idx],
+                out_channels=num_channels * self.channels_mult[idx + 1],
+                temb_dim=pemb_dim,
+                num_blocks=num_res_blocks,
+                attn=self.attn[idx],
+                downsample=True if idx != self.channels_mult.__len__() - 2 else False
+            ) for idx in range(self.channels_mult.__len__() - 1)
+        ])
+        bottleneck_channels = num_channels * self.channels_mult[-1]
+        self.bottleneck_res_a = ResidualBlock(in_channels=bottleneck_channels, out_channels=bottleneck_channels, temb_dim=pemb_dim, groups=8)
+        self.bottleneck_sa = SelfAttention(in_channels=bottleneck_channels, num_heads=8, head_dim=32, groups=8)
+        self.bottleneck_res_b = ResidualBlock(in_channels=bottleneck_channels, out_channels=bottleneck_channels, temb_dim=pemb_dim, groups=8)
+        self.out_conv = nn.Sequential(
+            nn.GroupNorm(num_groups=8, num_channels=bottleneck_channels),
+            nn.SiLU(),
+            nn.Conv2d(in_channels=bottleneck_channels, out_channels=self.z_channels, kernel_size=3, padding=1)
+        )
+    
+    def forward(self, x, pemb=None):
+        x = self.in_conv(x)
+        for encoder in self.enocoder:
+            x = encoder(x, pemb)
+        x = self.bottleneck_res_a(x, pemb)
+        x = self.bottleneck_sa(x)
+        x = self.bottleneck_res_b(x, pemb)
+        x = self.out_conv(x)
+        return x
+    
+class Decoder(nn.Module):
+    def __init__(
+        self, 
+        out_channels, 
+        z_channels, 
+        pemb_dim=None, 
+        num_channels=128, 
+        channels_mult=[1, 2, 4, 4],
+        num_res_blocks=2, 
+        attn=None
+    ) -> None:
+        super().__init__()
+        if attn is not None:
+            assert channels_mult.__len__() == attn.__len__(), 'channels_mult and attn must have the same length'
+            self.attn = list(reversed(attn))
+        else: 
+            self.attn = [False] * channels_mult.__len__()
+
+        self.channels_mult = list(reversed([1, *channels_mult]))
+        self.z_channels = z_channels
+        
+        # architecture modules
+        bottleneck_channels = num_channels * self.channels_mult[0]
+        self.in_conv = nn.Conv2d(self.z_channels, bottleneck_channels, kernel_size=3, padding='same')
+        self.bottleneck_res_a = ResidualBlock(in_channels=bottleneck_channels, out_channels=bottleneck_channels, temb_dim=pemb_dim, groups=8)
+        self.bottleneck_sa = SelfAttention(in_channels=bottleneck_channels, num_heads=8, head_dim=32, groups=8)
+        self.bottleneck_res_b = ResidualBlock(in_channels=bottleneck_channels, out_channels=bottleneck_channels, temb_dim=pemb_dim, groups=8)
+
+        self.decoder = nn.ModuleList([
+            DecodingBlock(
+                in_channels=num_channels * self.channels_mult[idx],
+                out_channels=num_channels * self.channels_mult[idx + 1],
+                temb_dim=pemb_dim,
+                num_blocks=num_res_blocks,
+                attn=self.attn[idx],
+                upsample=True if idx != 0 else False
+            ) for idx in range(self.channels_mult.__len__() - 1)
+        ])
+        
+        self.out_conv = nn.Sequential(
+            nn.GroupNorm(num_groups=8, num_channels=num_channels),
+            nn.SiLU(),
+            nn.Conv2d(in_channels=num_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        )
+        
+    def forward(self, x, pemb=None):
+        x = self.in_conv(x)
+        x = self.bottleneck_res_a(x, pemb)
+        x = self.bottleneck_sa(x)
+        x = self.bottleneck_res_b(x, pemb)
+        for decoder in self.decoder:
+            x = decoder(x, pemb)
+        x = self.out_conv(x)
+        return x
 
 
-class VAE(BaseVAE, nn.Module):
-    def __init__(self, args):
+##############################################################
+###################### VAE MODEL #############################
+##############################################################
 
-        BaseVAE.__init__(self, args)
-        nn.Module.__init__(self)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        self.name = args.model_name
-        # self.data_type = data_type
-        self.input_dim = args.input_dim
-        self.latent_dim = args.latent_dim
+class VariationalAutoencoder(nn.Module):
+    def __init__(
+        self,
+        input_shape, # should be only the image shape (C, H, W)
+        z_channels,
+        pemb_dim=None,
+        num_channels=128,
+        channels_mult=[1, 2, 4, 4],
+        num_res_blocks=2,
+        attn=None
+    ) -> None:
+        super().__init__()
 
+        self.input_shape = np.array(input_shape)
+        self.z_channels = z_channels
+        in_channels = out_channels = self.input_shape[0]
+        self.latent_shape = self.input_shape[1:] // 2 ** (channels_mult.__len__() - 1)
+        self.latent_dim = z_channels * np.prod(self.latent_shape)
+        
         # encoder network
-        self.fc1 = nn.Linear(args.input_dim, 400)
-        self.fc21 = nn.Linear(400, args.latent_dim)
-        self.fc22 = nn.Linear(400, args.latent_dim)
+        self.encoder = Encoder(
+            in_channels, 2 * z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
+        )
 
         # decoder network
-        self.fc3 = nn.Linear(args.latent_dim, 400)
-        self.fc4 = nn.Linear(400, args.input_dim)
-
-        self._encoder = self._encode_mlp
-        self._decoder = self._decode_mlp
+        self.decoder = Decoder(
+            out_channels, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
+        )
 
         # define a N(0, I) distribution
         self.normal = torch.distributions.MultivariateNormal(
-            loc=torch.zeros(args.latent_dim).to(self.device),
-            covariance_matrix=torch.eye(args.latent_dim).to(self.device),
+            loc=torch.zeros(self.latent_dim).to(device),
+            covariance_matrix=torch.eye(self.latent_dim).to(device),
         )
 
-    def forward(self, x):
-        """
-        The VAE model
-        """
-        mu, log_var = self.encode(x.view(-1, self.input_dim))
-        std = torch.exp(0.5 * log_var)
-        z, eps = self._sample_gauss(mu, std)
-        recon_x = self.decode(z)
-        return recon_x, z, eps, mu, log_var
+    def forward(self, x, pemb=None):
+        moments = self.encode(x, pemb)
+        z, mu, logvar, eps = DiagonalGaussianDistribution(moments).sample(return_all=True)
+        recon_x = self.decode(z, pemb)
+        return recon_x, z, mu, logvar, eps
 
     def loss_function(self, recon_x, x, mu, log_var):
         BCE = F.binary_cross_entropy(
-            recon_x, x.view(-1, self.input_dim), reduction="sum"
+            recon_x, x, reduction="sum"
         )
         KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-
         return BCE + KLD
 
-    def encode(self, x):
-        return self._encoder(x)
+    def encode(self, x, pemb=None):
+        moments = self.encoder(x, pemb).reshape(-1, 2 * self.latent_dim) # flattening for simplicity
+        return moments
 
-    def decode(self, z):
-        x_prob = self._decoder(z)
-        return x_prob
+    def decode(self, z, pemb=None):
+        z = z.reshape(-1, self.z_channels, *self.latent_shape) # reshape the latent space for simplicity
+        x_prob = self.decoder(z, pemb)
+        return torch.sigmoid(x_prob)
 
     def sample_img(
         self,
@@ -73,37 +197,23 @@ class VAE(BaseVAE, nn.Module):
         """
         Simulate p(x|z) to generate an image
         """
+        with torch.no_grad():
+            if z is None:
+                z = self.normal.sample(sample_shape=(n_samples,)).to(device)
 
-        if z is None:
-            z = self.normal.sample(sample_shape=(n_samples,)).to(self.device)
+            else:
+                n_samples = z.shape[0]
 
-        else:
-            n_samples = z.shape[0]
+            if x is not None:
+                recon_x, z, _, _, _ = self.forward(x)
+                return recon_x
 
-        if x is not None:
-            recon_x, z, _, _, _ = self.forward(x)
-
-        z.requires_grad_(True)
-        recon_x = self.decode(z)
-        return recon_x
-
-    def _encode_mlp(self, x):
-        h1 = F.relu(self.fc1(x))
-        return self.fc21(h1), self.fc22(h1)
-
-    def _decode_mlp(self, z):
-        h3 = F.relu(self.fc3(z))
-        return torch.sigmoid(self.fc4(h3))
-
-    def _sample_gauss(self, mu, std):
-        # Reparametrization trick
-        # Sample N(0, I)
-        eps = torch.randn_like(std)
-        return mu + eps * std, eps
+            # z.requires_grad_(True)
+            recon_x = self.decode(z)
+            return recon_x
 
     def _tempering(self, k, K):
         """Perform tempering step"""
-
         beta_k = (
             (1 - 1 / self.beta_zero_sqrt) * (k / K) ** 2
         ) + 1 / self.beta_zero_sqrt
@@ -112,49 +222,12 @@ class VAE(BaseVAE, nn.Module):
 
     ########## Estimate densities ##########
 
-    def get_metrics(self, recon_x, x, z, mu, log_var, sample_size=10):
-        """
-        Estimates all metrics '(log-densities, kl-dvg)
-
-        Output:
-        -------
-
-        log_densities (dict): Dict with keys [
-            'log_p_x_given_z',
-            'log_p_z_given_x',
-            'log_p_x'
-            'log_p_z'
-            'lop_p_xz'
-            ]
-
-        KL-dvg (dict): Dict with keys [
-            'kl_prior',
-            'kl_cond'
-            ]
-        """
-        metrics = {}
-
-        # metrics["log_p_x_given_z"] = self.log_p_x_given_z(recon_x, x)
-        # metrics["log_p_z_given_x"] = self.log_p_z_given_x(
-        #    z, recon_x, x, sample_size=sample_size
-        # )
-        # metrics["log_p_x"] = self.log_p_x(x, sample_size=sample_size)
-        # metrics["log_p_z"] = self.log_z(z)
-        # metrics["lop_p_xz"] = self.log_p_xz(recon_x, x, z)
-        # metrics["kl_prior"] = self.kl_prior(mu, log_var)
-        # metrics["kl_cond"] = self.kl_cond(
-        #    recon_x, x, z, mu, log_var, sample_size=sample_size
-        # )
-        return metrics
-
     def log_p_x_given_z(self, recon_x, x, reduction="none"):
         """
         Estimate the decoder's log-density modelled as follows:
             p(x|z)     = \prod_i Bernouilli(x_i|pi_{theta}(z_i))
             p(x = s|z) = \prod_i (pi(z_i))^x_i * (1 - pi(z_i)^(1 - x_i))"""
-        return -F.binary_cross_entropy(
-            recon_x, x.view(-1, self.input_dim), reduction=reduction
-        ).sum(dim=1)
+        return -F.binary_cross_entropy(recon_x, x, reduction=reduction).sum(dim=(1, 2, 3))
 
     def log_z(self, z):
         """
@@ -162,30 +235,29 @@ class VAE(BaseVAE, nn.Module):
         """
         return self.normal.log_prob(z)
 
+# NOTE: not working
     def log_p_x(self, x, sample_size=10):
         """
         Estimate log(p(x)) using importance sampling with q(z|x)
         """
-
-        mu, log_var = self.encode(x.view(-1, self.input_dim))
-        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=self.device)
-        Z = (mu + Eps * torch.exp(0.5 * log_var)).reshape(-1, self.latent_dim)
-        recon_X = self.decode(Z)
+        moments = self.encode(x)
+        z, mu, logvar, eps = DiagonalGaussianDistribution(moments).sample(return_all=True)
+        recon_x = self.decode(z)
         bce = F.binary_cross_entropy(
-            recon_X, x.view(-1, self.input_dim).repeat(sample_size, 1), reduction="none"
-        )
+            recon_x, x.repeat(sample_size, 1, 1, 1), reduction="none"
+        ).sum(dim=(1, 2, 3))
 
         # compute densities to recover p(x)
-        logpxz = -bce.reshape(sample_size, -1, self.input_dim).sum(dim=2)  # log(p(x|z))
+        logpxz = -bce.reshape(sample_size, -1, self.input_shape).sum(dim=2)
         logpz = self.log_z(Z).reshape(sample_size, -1)  # log(p(z))
         logqzx = self.normal.log_prob(Eps) - 0.5 * log_var.sum(dim=1)
 
         logpx = (logpxz + logpz - logqzx).logsumexp(dim=0).mean(dim=0) - torch.log(
-            torch.Tensor([sample_size]).to(self.device)
+            torch.Tensor([sample_size]).to(device)
         )
 
         return logpx
-
+# NOTE: not working
     def log_p_z_given_x(self, z, recon_x, x, sample_size=10):
         """
         Estimate log(p(z|x)) using Bayes rule and Importance Sampling for log(p(x))
@@ -225,8 +297,26 @@ class VAE(BaseVAE, nn.Module):
         return (logqzx - logpzx).sum()
 
 
-class HVAE(VAE):
-    def __init__(self, args):
+class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
+    def __init__(
+        self,
+        input_shape, # should be only the image shape (C, H, W)
+        z_channels,
+        pemb_dim=None,
+        T = 64,
+        num_channels=128,
+        channels_mult=[1, 2, 4, 4],
+        num_res_blocks=2,
+        attn=None,
+        n_lf=3,
+        eps_lf=0.001,
+        beta_zero=0.3,
+        lr=1e-5,
+        weight_decay=1e-6,
+        lr_d_factor=1,
+        precision=32,
+        **kwargs
+    ) -> None:
         """
         Inputs:
         -------
@@ -238,31 +328,41 @@ class HVAE(VAE):
         model_type (str): Model type for VAR (mlp, convnet)
         latent_dim (int): Latentn dimension
         """
-        VAE.__init__(self, args)
-
-        self.vae_forward = super().forward
-        self.n_lf = args.n_lf
-
-        self.eps_lf = nn.Parameter(torch.Tensor([args.eps_lf]), requires_grad=False)
-
-        assert 0 < args.beta_zero <= 1, "Tempering factor should belong to [0, 1]"
-
-        self.beta_zero_sqrt = nn.Parameter(
-            torch.Tensor([args.beta_zero]), requires_grad=False
+        pl.LightningModule.__init__(self)
+        VariationalAutoencoder.__init__(
+            self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
 
-    def forward(self, x):
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, 64, device)
+
+        self.vae_forward = super().forward
+        self.n_lf = n_lf
+
+        self.eps_lf = nn.Parameter(torch.Tensor([eps_lf]), requires_grad=False)
+
+        assert 0 < beta_zero <= 1, "Tempering factor should belong to [0, 1]"
+
+        self.beta_zero_sqrt = nn.Parameter(
+            torch.Tensor([beta_zero]), requires_grad=False
+        )
+
+        self.regularization = LPIPSWithDiscriminator(**kwargs['loss'])
+
+        self.save_hyperparameters()
+        self.automatic_optimization = False
+
+    def forward(self, x, pos):
         """
         The HVAE model
         """
-
-        recon_x, z0, eps0, mu, log_var = self.vae_forward(x)
-        gamma = torch.randn_like(z0, device=self.device)
+        pemb = self.positional_encoder(pos)
+        recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
+        gamma = torch.randn_like(z0, device=device)
         rho = gamma / self.beta_zero_sqrt
         z = z0
         beta_sqrt_old = self.beta_zero_sqrt
 
-        recon_x = self.decode(z)
+        recon_x = self.decode(z, pemb)
 
         for k in range(self.n_lf):
 
@@ -280,7 +380,7 @@ class HVAE(VAE):
             # 2nd leapfrog step
             z = z + self.eps_lf * rho_
 
-            recon_x = self.decode(z)
+            recon_x = self.decode(z, pemb)
 
             U = -self.log_p_xz(recon_x, x, z).sum()
             g = grad(U, z, create_graph=True)[0]
@@ -310,12 +410,12 @@ class HVAE(VAE):
         Estimate log(p(x)) using importance sampling on q(z|x)
         """
         mu, log_var = self.encode(x.view(-1, self.input_dim))
-        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=self.device)
+        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=device)
         Z = (mu + Eps * torch.exp(0.5 * log_var)).reshape(-1, self.latent_dim)
 
         recon_X = self.decode(Z)
 
-        gamma = torch.randn_like(Z, device=self.device)
+        gamma = torch.randn_like(Z, device=device)
         rho = gamma / self.beta_zero_sqrt
         rho0 = rho
         beta_sqrt_old = self.beta_zero_sqrt
@@ -360,21 +460,15 @@ class HVAE(VAE):
 
         logpx = (logpxz + logpz + logrho - logrho0 - logqzx).logsumexp(dim=0).mean(
             dim=0
-        ) - torch.log(torch.Tensor([sample_size]).to(self.device))
+        ) - torch.log(torch.Tensor([sample_size]).to(device))
         return logpx
 
-    def hamiltonian(self, recon_x, x, z, rho, G_inv=None, G_log_det=None):
+    def hamiltonian(self, recon_x, x, z):
         """
         Computes the Hamiltonian function.
         used for HVAE and RHVAE
         """
-        if self.name == "HVAE":
-            return -self.log_p_xz(recon_x, x, z).sum()
-        norm = (
-            torch.transpose(rho.unsqueeze(-1), 1, 2) @ G_inv @ rho.unsqueeze(-1)
-        ).sum()
-
-        return -self.log_p_xz(recon_x, x, z).sum() + 0.5 * norm + 0.5 * G_log_det.sum()
+        return -self.log_p_xz(recon_x, x, z).sum()
 
     def _tempering(self, k, K):
         """Perform tempering step"""
@@ -384,371 +478,98 @@ class HVAE(VAE):
         ) + 1 / self.beta_zero_sqrt
 
         return 1 / beta_k
+    
+    def training_step(self, batch, batch_idx):
+        # optimizers & schedulers
+        ae_opt, disc_opt = self.optimizers()
 
+        x, pos = batch
+        x, pos = x.type(torch.float16 if self.hparams.precision == 16 else torch.float32), pos.type(torch.long)
+        
+        # x_hat=x_hat, z=z, z0=z0, rho=rho, eps=eps, gamma=gamma, mean=mean, logvar=logvar
+        recon_x, z, z0, rho, eps0, gamma, mu, log_var = self.forward(x, pos)
 
-class RHVAE(HVAE):
-    def __init__(self, args):
-
-        HVAE.__init__(self, args)
-        # defines the Neural net to compute the metric
-
-        # first layer
-        self.metric_fc1 = nn.Linear(self.input_dim, args.metric_fc)
-
-        # diagonal
-        self.metric_fc21 = nn.Linear(args.metric_fc, self.latent_dim)
-        # remaining coefficients
-        k = int(self.latent_dim * (self.latent_dim - 1) / 2)
-        self.metric_fc22 = nn.Linear(args.metric_fc, k)
-
-        self.T = nn.Parameter(torch.Tensor([args.temperature]), requires_grad=False)
-        self.lbd = nn.Parameter(
-            torch.Tensor([args.regularization]), requires_grad=False
+        ########################
+        # Optimize Autoencoder #
+        ########################
+        hvae_loss = self.loss_function(recon_x, x, z0, z, rho, eps0, gamma, mu, log_var)
+        reg_loss, reg_log = self.regularization.autoencoder_loss(
+            x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
+        
+        ae_loss = hvae_loss + reg_loss
+        ae_opt.zero_grad(set_to_none=True)
+        self.manual_backward(ae_loss)
+        ae_opt.step()
+        # ae_scheduler.step()
 
-        # this is used to store the matrices and centroids throughout training for
-        # further use in metric update (L is the cholesky decomposition of M)
-        self.M = []
-        self.centroids = []
+        ##########################
+        # Optimize Discriminator #
+        ##########################
+        # sampling an image
+        generated = self.sample_img(n_samples=x.shape[0])
 
-        # define a starting metric (c_i = 0 & L = I_d)
-        def G(z):
-            return (
-                torch.eye(self.latent_dim, device=self.device).unsqueeze(0)
-                * torch.exp(-torch.norm(z.unsqueeze(1), dim=-1) ** 2)
-                .unsqueeze(-1)
-                .unsqueeze(-1)
-            ).sum(dim=1) + self.lbd * torch.eye(self.latent_dim).to(self.device)
+        disc_loss, disc_log = self.regularization.discriminator_loss(x, generated, self.global_step)
+        disc_opt.zero_grad(set_to_none=True)
+        self.manual_backward(disc_loss)
+        disc_opt.step()
+        # disc_scheduler.step()
 
-        self.G = G
+        # logging
+        self.log('hvae_loss', hvae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict(reg_log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict(disc_log, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+    
+    def configure_optimizers(self):
+        ae_opt = torch.optim.AdamW(list(self.encoder.parameters()) + 
+                                   list(self.decoder.parameters()) + 
+                                   list(self.positional_encoder.parameters()),
+                                   lr=self.hparams.lr, weight_decay=self.hparams.weight_decay, betas=(0.5, 0.9))
+        disc_opt = torch.optim.AdamW(list(self.regularization.discriminator.parameters()), 
+                                    lr=self.hparams.lr * self.hparams.lr_d_factor, weight_decay=self.hparams.weight_decay, betas=(0.5, 0.9))
 
-    def metric_forward(self, x):
-        """
-        This function returns the outputs of the metric neural network
+        return [ae_opt, disc_opt]
 
-        Outputs:
-        --------
 
-        L (Tensor): The L matrix as used in the metric definition
-        M (Tensor): L L^T
-        """
+class DiagonalGaussianDistribution(object):
+    def __init__(self, parameters, deterministic=False):
+        self.parameters = parameters
+        self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
+        self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
+        self.deterministic = deterministic
+        self.std = torch.exp(0.5 * self.logvar)
+        self.var = torch.exp(self.logvar)
+        if self.deterministic:
+            self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
 
-        h1 = torch.relu(self.metric_fc1(x.view(-1, self.input_dim)))
-        h21, h22 = self.metric_fc21(h1), self.metric_fc22(h1)
+    def sample(self, return_all=False):
+        eps = torch.randn(self.mean.shape).to(device=self.parameters.device)
+        z = self.mean + self.std * eps
+        if return_all:
+            return z, self.mean, self.logvar, eps
+        return z
 
-        L = torch.zeros((x.shape[0], self.latent_dim, self.latent_dim)).to(self.device)
-        indices = torch.tril_indices(
-            row=self.latent_dim, col=self.latent_dim, offset=-1
-        )
-
-        # get non-diagonal coefficients
-        L[:, indices[0], indices[1]] = h22
-
-        # add diagonal coefficients
-        L = L + torch.diag_embed(h21.exp())
-
-        return L, L @ torch.transpose(L, 1, 2)
-
-    def update_metric(self):
-        """
-        As soon as the model has seen all the data points (i.e. at the end of 1 loop)
-        we update the final metric function using \mu(x_i) as centroids
-        """
-        # convert to 1 big tensor
-        self.M_tens = torch.cat(self.M)
-        self.centroids_tens = torch.cat(self.centroids)
-
-        # define new metric
-        def G(z):
-            return torch.inverse(
-                (
-                    self.M_tens.unsqueeze(0)
-                    * torch.exp(
-                        -torch.norm(
-                            self.centroids_tens.unsqueeze(0) - z.unsqueeze(1), dim=-1
-                        )
-                        ** 2
-                        / (self.T ** 2)
-                    )
-                    .unsqueeze(-1)
-                    .unsqueeze(-1)
-                ).sum(dim=1)
-                + self.lbd * torch.eye(self.latent_dim).to(self.device)
-            )
-
-        def G_inv(z):
-            return (
-                self.M_tens.unsqueeze(0)
-                * torch.exp(
-                    -torch.norm(
-                        self.centroids_tens.unsqueeze(0) - z.unsqueeze(1), dim=-1
-                    )
-                    ** 2
-                    / (self.T ** 2)
-                )
-                .unsqueeze(-1)
-                .unsqueeze(-1)
-            ).sum(dim=1) + self.lbd * torch.eye(self.latent_dim).to(self.device)
-
-        self.G = G
-        self.G_inv = G_inv
-        self.M = []
-        self.centroids = []
-
-    def forward(self, x):
-        """
-        The RHVAE model
-        """
-
-        recon_x, z0, eps0, mu, log_var = self.vae_forward(x)
-
-        z = z0
-
-        if self.training:
-
-            # update the metric using batch data points
-            L, M = self.metric_forward(x)
-
-            # store LL^T and mu(x_i) to update final metric
-            self.M.append(M.clone().detach())
-            self.centroids.append(mu.clone().detach())
-
-            G_inv = (
-                M.unsqueeze(0)
-                * torch.exp(
-                    -torch.norm(mu.unsqueeze(0) - z.unsqueeze(1), dim=-1) ** 2
-                    / (self.T ** 2)
-                )
-                .unsqueeze(-1)
-                .unsqueeze(-1)
-            ).sum(dim=1) + self.lbd * torch.eye(self.latent_dim).to(self.device)
-
+    def kl(self, other=None):
+        if self.deterministic:
+            return torch.Tensor([0.])
         else:
-            G = self.G(z)
-            G_inv = self.G_inv(z)
-            L = torch.cholesky(G)
-
-        G_log_det = -torch.logdet(G_inv)
-
-        gamma = torch.randn_like(z0, device=self.device)
-        rho = gamma / self.beta_zero_sqrt
-        beta_sqrt_old = self.beta_zero_sqrt
-
-        # sample \rho from N(0, G)
-        rho = (L @ rho.unsqueeze(-1)).squeeze(-1)
-
-        recon_x = self.decode(z)
-
-        for k in range(self.n_lf):
-
-            # perform leapfrog steps
-
-            # step 1
-            rho_ = self.leap_step_1(recon_x, x, z, rho, G_inv, G_log_det)
-
-            # step 2
-            z = self.leap_step_2(recon_x, x, z, rho_, G_inv, G_log_det)
-
-            recon_x = self.decode(z)
-
-            if self.training:
-
-                G_inv = (
-                    M.unsqueeze(0)
-                    * torch.exp(
-                        -torch.norm(mu.unsqueeze(0) - z.unsqueeze(1), dim=-1) ** 2
-                        / (self.T ** 2)
-                    )
-                    .unsqueeze(-1)
-                    .unsqueeze(-1)
-                ).sum(dim=1) + self.lbd * torch.eye(self.latent_dim).to(self.device)
-
+            if other is None:
+                return 0.5 * torch.sum(torch.pow(self.mean, 2)
+                                       + self.var - 1.0 - self.logvar,
+                                       dim=[1, 2, 3])
             else:
-                # compute metric value on new z using final metric
-                G = self.G(z)
-                G_inv = self.G_inv(z)
+                return 0.5 * torch.sum(
+                    torch.pow(self.mean - other.mean, 2) / other.var
+                    + self.var / other.var - 1.0 - self.logvar + other.logvar,
+                    dim=[1, 2, 3])
 
-            G_log_det = -torch.logdet(G_inv)
+    def nll(self, sample, dims=[1,2,3]):
+        if self.deterministic:
+            return torch.Tensor([0.])
+        logtwopi = np.log(2.0 * np.pi)
+        return 0.5 * torch.sum(
+            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
+            dim=dims)
 
-            # step 3
-            rho__ = self.leap_step_3(recon_x, x, z, rho_, G_inv, G_log_det)
-
-            # tempering
-            beta_sqrt = self._tempering(k + 1, self.n_lf)
-            rho = (beta_sqrt_old / beta_sqrt) * rho__
-            beta_sqrt_old = beta_sqrt
-
-        return recon_x, z, z0, rho, eps0, gamma, mu, log_var, G_inv, G_log_det
-
-    def leap_step_1(self, recon_x, x, z, rho, G_inv, G_log_det, steps=3):
-        """
-        Resolves first equation of generalized leapfrog integrator
-        using fixed point iterations
-        """
-
-        def f_(rho_):
-            H = self.hamiltonian(recon_x, x, z, rho_, G_inv, G_log_det)
-            gz = grad(H, z, retain_graph=True)[0]
-            return rho - 0.5 * self.eps_lf * gz
-
-        rho_ = rho.clone()
-        for _ in range(steps):
-            rho_ = f_(rho_)
-        return rho_
-
-    def leap_step_2(self, recon_x, x, z, rho, G_inv, G_log_det, steps=3):
-        """
-        Resolves second equation of generalized leapfrog integrator
-        using fixed point iterations
-        """
-        H0 = self.hamiltonian(recon_x, x, z, rho, G_inv, G_log_det)
-        grho_0 = grad(H0, rho)[0]
-
-        def f_(z_):
-            H = self.hamiltonian(recon_x, x, z_, rho, G_inv, G_log_det)
-            grho = grad(H, rho, retain_graph=True)[0]
-            return z + 0.5 * self.eps_lf * (grho_0 + grho)
-
-        z_ = z.clone()
-        for _ in range(steps):
-            z_ = f_(z_)
-        return z_
-
-    def leap_step_3(self, recon_x, x, z, rho, G_inv, G_log_det, steps=3):
-        """
-        Resolves third equation of generalized leapfrog integrator
-        using fixed point iterations
-        """
-        H = self.hamiltonian(recon_x, x, z, rho, G_inv, G_log_det)
-        gz = grad(H, z, create_graph=True)[0]
-        return rho - 0.5 * self.eps_lf * gz
-
-    def loss_function(
-        self, recon_x, x, z0, zK, rhoK, eps0, gamma, mu, log_var, G_inv, G_log_det
-    ):
-
-        logpxz = self.log_p_xz(recon_x, x, zK)  # log p(x, z_K)
-        logrhoK = (
-            -0.5
-            * (torch.transpose(rhoK.unsqueeze(-1), 1, 2) @ G_inv @ rhoK.unsqueeze(-1))
-            .squeeze()
-            .squeeze()
-            - 0.5 * G_log_det
-        ) - torch.log(
-            torch.tensor([2 * np.pi]).to(self.device)
-        ) * self.latent_dim / 2  # log p(\rho_K)
-
-        logp = logpxz + logrhoK
-
-        logq = self.normal.log_prob(eps0) - 0.5 * log_var.sum(dim=1)  # log(q(z_0|x))
-
-        return -(logp - logq).sum()
-
-    def log_p_x(self, x, sample_size=10):
-        """
-        Estimate log(p(x)) using importance sampling on q(z|x)
-        """
-        # print(sample_size)
-        mu, log_var = self.encode(x.view(-1, self.input_dim))
-        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=self.device)
-        Z = (mu + Eps * torch.exp(0.5 * log_var)).reshape(-1, self.latent_dim)
-
-        Z0 = Z
-
-        recon_X = self.decode(Z)
-
-        # get metric value
-        G_rep = self.G(Z)
-        G_inv_rep = self.G_inv(Z)
-
-        G_log_det_rep = torch.logdet(G_rep)
-
-        L_rep = torch.cholesky(G_rep)
-
-        G_inv_rep_0 = G_inv_rep
-        G_log_det_rep_0 = G_log_det_rep
-
-        # initialization
-        gamma = torch.randn_like(Z0, device=self.device)
-        rho = gamma / self.beta_zero_sqrt
-        beta_sqrt_old = self.beta_zero_sqrt
-
-        rho = (L_rep @ rho.unsqueeze(-1)).squeeze(
-            -1
-        )  # sample from the multivariate N(0, G)
-
-        rho0 = rho
-
-        X_rep = x.repeat(sample_size, 1, 1, 1).reshape(-1, self.input_dim)
-
-        for k in range(self.n_lf):
-
-            # step 1
-            rho_ = self.leap_step_1(recon_X, X_rep, Z, rho, G_inv_rep, G_log_det_rep)
-
-            # step 2
-            Z = self.leap_step_2(recon_X, X_rep, Z, rho_, G_inv_rep, G_log_det_rep)
-
-            recon_X = self.decode(Z)
-
-            G_rep_inv = self.G_inv(Z)
-            G_log_det_rep = -torch.logdet(G_rep_inv)
-
-            # step 3
-            rho__ = self.leap_step_3(recon_X, X_rep, Z, rho_, G_inv_rep, G_log_det_rep)
-
-            # tempering
-            beta_sqrt = self._tempering(k + 1, self.n_lf)
-            rho = (beta_sqrt_old / beta_sqrt) * rho__
-            beta_sqrt_old = beta_sqrt
-
-        bce = F.binary_cross_entropy(recon_X, X_rep, reduction="none")
-
-        # compute densities to recover p(x)
-        logpxz = -bce.reshape(sample_size, -1, self.input_dim).sum(dim=2)  # log(p(X|Z))
-
-        logpz = self.log_z(Z).reshape(sample_size, -1)  # log(p(Z))
-
-        logrho0 = (
-            (
-                -0.5
-                * (
-                    torch.transpose(rho0.unsqueeze(-1), 1, 2)
-                    * self.beta_zero_sqrt
-                    @ G_inv_rep_0
-                    @ rho0.unsqueeze(-1)
-                    * self.beta_zero_sqrt
-                )
-                .squeeze()
-                .squeeze()
-                - 0.5 * G_log_det_rep_0
-            )
-            - torch.log(torch.tensor([2 * np.pi]).to(self.device)) * self.latent_dim / 2
-        ).reshape(sample_size, -1)
-
-        # log(p(\rho_0))
-        logrho = (
-            (
-                -0.5
-                * (
-                    torch.transpose(rho.unsqueeze(-1), 1, 2)
-                    @ G_inv_rep
-                    @ rho.unsqueeze(-1)
-                )
-                .squeeze()
-                .squeeze()
-                - 0.5 * G_log_det_rep
-            )
-            - torch.log(torch.tensor([2 * np.pi]).to(self.device)) * self.latent_dim / 2
-        ).reshape(sample_size, -1)
-        # log(p(\rho_K))
-
-        logqzx = self.normal.log_prob(Eps) - 0.5 * log_var.sum(dim=1)  # log(q(Z_0|X))
-
-        logpx = (logpxz + logpz + logrho - logrho0 - logqzx).logsumexp(dim=0).mean(
-            dim=0
-        ) - torch.log(
-            torch.Tensor([sample_size]).to(self.device)
-        )  # + self.latent_dim /2 * torch.log(self.beta_zero_sqrt ** 2)
-
-        return logpx
+    def mode(self):
+        return self.mean

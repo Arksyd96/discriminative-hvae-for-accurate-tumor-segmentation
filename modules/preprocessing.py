@@ -95,8 +95,7 @@ class BRATSDataModule(pl.LightningDataModule):
         self.data = self.data[:self.hparams.n_samples]
         
         # normalize the data [0, 1]
-        self.data = self.data / self.data.max()
-        self.data = self.data.clamp(0, 1)
+        self.data = (self.data - self.data.min()) / (self.data.max() - self.data.min())
 
         self.data = self.data.permute(0, 4, 1, 2, 3) # depth first
             
@@ -129,15 +128,6 @@ class BRATSDataModule(pl.LightningDataModule):
             self.train_dataset, 
             batch_size=self.hparams.batch_size, 
             shuffle=self.hparams.shuffle, 
-            num_workers=self.hparams.num_workers, 
-            pin_memory=True
-        )
-        
-    def val_dataloader(self):
-        return torch.utils.data.DataLoader(
-            self.test_dataset, 
-            batch_size=self.hparams.batch_size, 
-            shuffle=False, 
             num_workers=self.hparams.num_workers, 
             pin_memory=True
         )

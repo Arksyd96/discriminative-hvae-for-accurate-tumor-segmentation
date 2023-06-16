@@ -12,7 +12,6 @@ data:
     num_workers: 8
 autoencoder:
     input_shape: [2, 128, 128] # channels, height, width
-    embed_dim: 1
     z_channels: 2
     pemb_dim: 128
     T: 64
@@ -24,7 +23,13 @@ autoencoder:
     - 4
     num_res_blocks: 2
     attn: [false, false, false, true]
-    learning_rate: 0.00001
+    n_lf: 3
+    eps_lf: 0.001
+    beta_zero: 0.3
+    lr: 0.00001
+    weight_decay: 0.000001
+    lr_d_factor: 1
+    precision: 32
     loss:
         disc_start: 10001
         pixel_weight: 0.01
@@ -41,4 +46,4 @@ callbacks:
         monitor: 
         dirpath: ./checkpoints
         save_top_k: 1
-        every_n_epochs: 2
+        every_n_epochs: 50
