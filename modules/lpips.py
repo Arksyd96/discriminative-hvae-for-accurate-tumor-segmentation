@@ -230,12 +230,10 @@ class LPIPSWithDiscriminator(nn.Module):
         l1_loss = F.l1_loss(recon_x, x, reduction='none') * self.pixel_weight
 
         # perceptual loss
-        if self.perceptual_weight > 0:
-            p_loss = self.lpips(x, recon_x)
-            rec_loss = l1_loss + p_loss * self.perceptual_weight
-
-        # rec_loss = rec_loss.mean()
+        p_loss = self.lpips(x, recon_x)
+        rec_loss = l1_loss + p_loss * self.perceptual_weight
         nll_loss = rec_loss / torch.exp(self.logvar) + self.logvar
+
         weighted_nll_loss = nll_loss
         if weights is not None:
             weighted_nll_loss = nll_loss * weights

@@ -28,19 +28,18 @@ autoencoder:
     beta_zero: 0.3
     lr: 0.00001
     weight_decay: 0.000001
-    lr_d_factor: 1
+    lr_d_factor: 1.0
     precision: 32
     loss:
         disc_start: 10001
-        pixel_weight: 0.01
+        pixel_weight: 0.1
         perceptual_weight: 1.0
-        disc_weight: 0.5
+        disc_weight: 1.0
         disc_input_channels: 2
         disc_channels: 64
         disc_num_layers: 3
         disc_factor: 1.0
         logvar_init: 0.0
-        kl_weight: 0.0000001
 callbacks:
     checkpoint:
         monitor: 

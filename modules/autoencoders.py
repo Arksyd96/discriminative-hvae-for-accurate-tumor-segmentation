@@ -311,6 +311,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         n_lf=3,
         eps_lf=0.001,
         beta_zero=0.3,
+        reg_weight=0.05,
         lr=1e-5,
         weight_decay=1e-6,
         lr_d_factor=1,
@@ -337,6 +338,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
+        self.reg_weight = reg_weight
 
         self.eps_lf = nn.Parameter(torch.Tensor([eps_lf]), requires_grad=False)
 
@@ -497,7 +499,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
         
-        ae_loss = hvae_loss + reg_loss
+        ae_loss = (1 - self.reg_weight) * hvae_loss + self.reg_weight * reg_loss
         ae_opt.zero_grad(set_to_none=True)
         self.manual_backward(ae_loss)
         ae_opt.step()
@@ -535,10 +537,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         z=None,
         x=None,
         pos=None,
-        step_nbr=1,
-        record_path=False,
-        n_samples=1,
-        verbose=False,
+        n_samples=1
     ):
         """
         Simulate p(x|z) to generate an image
