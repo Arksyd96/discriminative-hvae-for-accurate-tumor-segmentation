@@ -8,7 +8,7 @@
 #SBATCH --time 48:00:00
 
 # Memory to use (here 50Go)
-#SBATCH --mem 38000
+#SBATCH --mem 100000
 
 # Type of gpu to use, either gpu_all, gpu_k80, gpu_p100 or gpu_v100
 #SBATCH --partition gpu_v100
@@ -20,7 +20,7 @@
 #SBATCH --ntasks-per-node=4
 
 # Number of node to use
-#SBATCH --nodes 1
+#SBATCH --nodes 2
 
 # Number of cpu to use
 #SBATCH --cpus-per-task=6

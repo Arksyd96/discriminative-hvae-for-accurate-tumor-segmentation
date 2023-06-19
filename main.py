@@ -55,15 +55,15 @@ if __name__ == "__main__":
     # callbacks
     checkpoint_callback = ModelCheckpoint(
         **cfg.callbacks.checkpoint,
-        filename='{epoch}-{val_loss:.2f}',
+        filename='ckpt-{epoch}',
     )
     
     # training
     trainer = pl.Trainer(
         logger=logger,
-        # strategy="ddp",
-        # devices=4,
-        # num_nodes=1,
+        strategy="ddp",
+        devices=4,
+        num_nodes=2,
         accelerator='gpu',
         precision=32,
         max_epochs=30,
