@@ -24,7 +24,7 @@ class ImageSampler(pl.Callback):
                 for idx in range(generated.shape[1])
             ], dim=0)
 
-            img_grid = img_grid.detach().cpu().numpy()
+            img_grid = img_grid.unsqueeze(-1).detach().cpu().numpy()
             img_grid = (img_grid * 255).astype(np.uint8) # denormalize
             
             wandb.log({
