@@ -329,7 +329,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         )
         
         print('Device: ', self.device)
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=self.device)
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=None)
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
@@ -345,12 +345,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         self.regularization = LPIPSWithDiscriminator(**kwargs['loss'])
 
-        # define a N(0, I) distribution [Overriding because of the GPU]
-        self.normal = torch.distributions.MultivariateNormal(
-            loc=torch.zeros(self.latent_dim).to(self.device),
-            covariance_matrix=torch.eye(self.latent_dim).to(self.device),
-        )
-
         self.save_hyperparameters()
         self.automatic_optimization = False
 
@@ -359,9 +353,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         The HVAE model
         """
         pemb = self.positional_encoder(pos)
-        print('*************************************')
-        print(pemb.shape, pemb.device, self.device)
-        print('*************************************')
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
         gamma = torch.randn_like(z0, device=x.device)
         rho = gamma / self.beta_zero_sqrt
@@ -484,6 +475,15 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         ) + 1 / self.beta_zero_sqrt
 
         return 1 / beta_k
+    
+    def on_train_start(self) -> None:
+        # pushing the normal distribution attributes to GPU
+        self.normal = torch.distributions.MultivariateNormal(
+            loc=torch.zeros(self.latent_dim).to(self.device),   # at this point local GPU is recognized 
+            covariance_matrix=torch.eye(self.latent_dim).to(self.device),
+        )
+
+        self.positional_encoder.embedding = self.positional_encoder.embedding.to(self.device)
     
     def training_step(self, batch, batch_idx):
         # optimizers & schedulers
