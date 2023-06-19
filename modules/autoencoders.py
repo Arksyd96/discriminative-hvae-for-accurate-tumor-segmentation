@@ -334,13 +334,11 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         self.n_lf = n_lf
         self.reg_weight = reg_weight
 
-        self.eps_lf = nn.Parameter(torch.Tensor([eps_lf]), requires_grad=False)
+        self.eps_lf = eps_lf
 
         assert 0 < beta_zero <= 1, "Tempering factor should belong to [0, 1]"
 
-        self.beta_zero_sqrt = nn.Parameter(
-            torch.Tensor([beta_zero]), requires_grad=False
-        )
+        self.beta_zero_sqrt = beta_zero
 
         self.regularization = LPIPSWithDiscriminator(**kwargs['loss'])
 
