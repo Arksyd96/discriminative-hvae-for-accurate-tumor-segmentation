@@ -126,8 +126,6 @@ class Decoder(nn.Module):
 ###################### VAE MODEL #############################
 ##############################################################
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 class VariationalAutoencoder(nn.Module):
     def __init__(
         self,
@@ -159,8 +157,8 @@ class VariationalAutoencoder(nn.Module):
 
         # define a N(0, I) distribution
         self.normal = torch.distributions.MultivariateNormal(
-            loc=torch.zeros(self.latent_dim).to(device),
-            covariance_matrix=torch.eye(self.latent_dim).to(device),
+            loc=torch.zeros(self.latent_dim),
+            covariance_matrix=torch.eye(self.latent_dim),
         )
 
     def forward(self, x, pemb=None):
@@ -170,9 +168,7 @@ class VariationalAutoencoder(nn.Module):
         return recon_x, z, mu, logvar, eps
 
     def loss_function(self, recon_x, x, mu, log_var):
-        BCE = F.binary_cross_entropy(
-            recon_x, x, reduction="sum"
-        )
+        BCE = F.binary_cross_entropy(recon_x, x, reduction="sum")
         KLD = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
         return BCE + KLD
 
@@ -189,10 +185,8 @@ class VariationalAutoencoder(nn.Module):
         self,
         z=None,
         x=None,
-        step_nbr=1,
-        record_path=False,
         n_samples=1,
-        verbose=False,
+        device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
     ):
         """
         Simulate p(x|z) to generate an image
@@ -334,7 +328,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
 
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, device)
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, self.device)
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
@@ -359,7 +353,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         """
         pemb = self.positional_encoder(pos)
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
-        gamma = torch.randn_like(z0, device=device)
+        gamma = torch.randn_like(z0, device=x.device)
         rho = gamma / self.beta_zero_sqrt
         z = z0
         beta_sqrt_old = self.beta_zero_sqrt
@@ -412,12 +406,12 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         Estimate log(p(x)) using importance sampling on q(z|x)
         """
         mu, log_var = self.encode(x.view(-1, self.input_dim))
-        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=device)
+        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=x.device)
         Z = (mu + Eps * torch.exp(0.5 * log_var)).reshape(-1, self.latent_dim)
 
         recon_X = self.decode(Z)
 
-        gamma = torch.randn_like(Z, device=device)
+        gamma = torch.randn_like(Z, device=x.device)
         rho = gamma / self.beta_zero_sqrt
         rho0 = rho
         beta_sqrt_old = self.beta_zero_sqrt
@@ -462,7 +456,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         logpx = (logpxz + logpz + logrho - logrho0 - logqzx).logsumexp(dim=0).mean(
             dim=0
-        ) - torch.log(torch.Tensor([sample_size]).to(device))
+        ) - torch.log(torch.Tensor([sample_size]).to(x.device))
         return logpx
 
     def hamiltonian(self, recon_x, x, z):
@@ -537,7 +531,8 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         z=None,
         x=None,
         pos=None,
-        n_samples=1
+        n_samples=1,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
         """
         Simulate p(x|z) to generate an image

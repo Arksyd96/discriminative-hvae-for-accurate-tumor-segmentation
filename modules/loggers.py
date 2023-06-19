@@ -16,7 +16,7 @@ class ImageSampler(pl.Callback):
         if trainer.global_rank == 0:
             # sample images
             pl_module.eval()
-            generated = pl_module.sample_img(n_samples=self.n_samples)
+            generated = pl_module.sample_img(n_samples=self.n_samples, device=pl_module.device)
             
             # channel wise grid
             img_grid = torch.cat([ 
