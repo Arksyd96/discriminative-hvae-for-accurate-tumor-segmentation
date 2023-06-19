@@ -3,18 +3,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 class TimePositionalEmbedding(nn.Module):
-    def __init__(self, dimension, T=1000, device=None) -> None:
+    def __init__(self, dimension, T=1000, local_device=None) -> None:
         super().__init__()
         self.embedding = torch.zeros(T, dimension)
         position = torch.arange(0, T, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, dimension, 2).float() * (-np.log(10000.0) / dimension))
         self.embedding[:, 0::2] = torch.sin(position * div_term)
         self.embedding[:, 1::2] = torch.cos(position * div_term)
-        if device is not None:
-            self.embedding = self.embedding.to(device)
+        if local_device is not None:
+            self.embedding = self.embedding.to(local_device)
     
     def forward(self, timestep):
         return self.embedding[timestep]
