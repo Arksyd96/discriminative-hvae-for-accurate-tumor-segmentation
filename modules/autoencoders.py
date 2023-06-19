@@ -331,7 +331,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
         
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, device=self.local_device)
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=self.local_device)
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
