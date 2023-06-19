@@ -328,7 +328,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
         
-        print(torch.cuda.current_device())
+        print('Device: ', self.device)
         self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=self.device)
 
         self.vae_forward = super().forward
@@ -360,7 +360,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         """
         pemb = self.positional_encoder(pos)
         print('*************************************')
-        print(pemb.shape, self.device)
+        print(pemb.shape, pemb.device, self.device)
         print('*************************************')
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
         gamma = torch.randn_like(z0, device=x.device)
