@@ -9,7 +9,7 @@ data:
     root_path: ../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021
     batch_size: 4
     shuffle: true
-    num_workers: 8
+    num_workers: 6
 autoencoder:
     input_shape: [2, 128, 128] # channels, height, width
     z_channels: 2
