@@ -358,6 +358,9 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         The HVAE model
         """
         pemb = self.positional_encoder(pos)
+        print('*************************************')
+        print(pemb.shape, pemb.device)
+        print('*************************************')
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
         gamma = torch.randn_like(z0, device=x.device)
         rho = gamma / self.beta_zero_sqrt
