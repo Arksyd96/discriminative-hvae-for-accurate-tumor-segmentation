@@ -333,7 +333,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
 
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, 64, device)
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, device)
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
@@ -529,6 +529,37 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
                                     lr=self.hparams.lr * self.hparams.lr_d_factor, weight_decay=self.hparams.weight_decay, betas=(0.5, 0.9))
 
         return [ae_opt, disc_opt]
+    
+    def sample_img(
+        self,
+        z=None,
+        x=None,
+        pos=None,
+        step_nbr=1,
+        record_path=False,
+        n_samples=1,
+        verbose=False,
+    ):
+        """
+        Simulate p(x|z) to generate an image
+        """
+        with torch.no_grad():
+            if z is None:
+                z = self.normal.sample(sample_shape=(n_samples,)).to(device)
+
+            if pos is None:
+                pos = torch.randint(0, self.hparams.T, (n_samples,)).to(device)
+
+            else:
+                n_samples = z.shape[0]
+
+            if x is not None:
+                recon_x, z, _, _, _ = self.forward(x, pos)
+                return recon_x
+
+            # z.requires_grad_(True)
+            recon_x = self.decode(z, pemb=self.positional_encoder(pos))
+            return recon_x
 
 
 class DiagonalGaussianDistribution(object):
