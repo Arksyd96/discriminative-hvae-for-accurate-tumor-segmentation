@@ -94,8 +94,9 @@ class BRATSDataModule(pl.LightningDataModule):
         self.data = torch.from_numpy(np.load(self.hparams.npy_path))
         self.data = self.data[:self.hparams.n_samples]
         
-        # normalize the data [0, 1]
-        self.data = (self.data - self.data.min()) / (self.data.max() - self.data.min())
+        # normalize the data [0, 1] example by example
+        for idx in range(self.data.shape[0]):
+            self.data[idx] = (self.data[idx] - self.data[idx].min()) / (self.data[idx].max() - self.data[idx].min())
 
         self.data = self.data.permute(0, 4, 1, 2, 3) # depth first
             
