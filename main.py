@@ -49,7 +49,7 @@ if __name__ == "__main__":
     datamodule = BRATSDataModule(**cfg.data)
         
     image_sampler_logger = ImageSampler(
-        n_samples=5, label='Image sampling ... - {epoch}'
+        n_samples=5, label='Image sampling'
     )
     
     # callbacks

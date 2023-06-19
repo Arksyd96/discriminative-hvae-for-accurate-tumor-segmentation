@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import pytorch_lightning as pl
 import wandb
@@ -22,11 +23,13 @@ class ImageSampler(pl.Callback):
                 torch.hstack([img for img in generated[:, idx, ...]])
                 for idx in range(generated.shape[1])
             ], dim=0)
+
+            img_grid = img_grid.detach().cpu().numpy()
+            img_grid = (img_grid * 255).astype(np.uint8) # denormalize
             
             wandb.log({
                 'Reconstruction examples': wandb.Image(
-                    img_grid.detach().cpu().numpy(), 
-                    caption='{}'.format(self.label)
+                    img_grid, caption='{}'.format(self.label)
                 )
             })
             
