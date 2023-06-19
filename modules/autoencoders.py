@@ -139,6 +139,9 @@ class VariationalAutoencoder(nn.Module):
     ) -> None:
         super().__init__()
 
+        device_idx = torch.cuda.current_device()
+        self.local_device = torch.device(f"cuda:{device_idx}" if torch.cuda.is_available() else "cpu")
+
         self.input_shape = np.array(input_shape)
         self.z_channels = z_channels
         in_channels = out_channels = self.input_shape[0]
@@ -157,8 +160,8 @@ class VariationalAutoencoder(nn.Module):
 
         # define a N(0, I) distribution
         self.normal = torch.distributions.MultivariateNormal(
-            loc=torch.zeros(self.latent_dim),
-            covariance_matrix=torch.eye(self.latent_dim),
+            loc=torch.zeros(self.latent_dim).to(self.local_device),
+            covariance_matrix=torch.eye(self.latent_dim).to(self.local_device),
         )
 
     def forward(self, x, pemb=None):
@@ -327,8 +330,8 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         VariationalAutoencoder.__init__(
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
-
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, device=torch.cuda.device(torch.cuda.current_device()))
+        
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, device=self.local_device)
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
