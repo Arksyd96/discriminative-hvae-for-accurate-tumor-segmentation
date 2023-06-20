@@ -22,6 +22,7 @@ class BRATSDataModule(pl.LightningDataModule):
     def __init__(self,
         target_shape=(64, 128, 128),
         n_samples=500,
+        train_ratio=0.8,
         modalities=['t1', 't1ce', 't2', 'flair', 'seg'],
         binarize=True,
         npy_path='../data/brats_preprocessed.npy',
@@ -95,8 +96,12 @@ class BRATSDataModule(pl.LightningDataModule):
         self.data = self.data[:self.hparams.n_samples]
         
         # normalize the data [0, 1] example by example
+
+        # for idx in range(self.data.shape[0]):
+        #     self.data[idx] = (self.data[idx] - self.data[idx].min()) / (self.data[idx].max() - self.data[idx].min())
+
         for idx in range(self.data.shape[0]):
-            self.data[idx] = (self.data[idx] - self.data[idx].min()) / (self.data[idx].max() - self.data[idx].min())
+            self.data[idx][0] = (self.data[idx][0] - self.data[idx][0].min()) / (self.data[idx][0].max() - self.data[idx][0].min())
 
         self.data = self.data.permute(0, 4, 1, 2, 3) # depth first
             
@@ -107,22 +112,32 @@ class BRATSDataModule(pl.LightningDataModule):
         # keeping track on slice positions for positional embedding
         self.slice_positions = torch.arange(D)[None, :].repeat(self.hparams.n_samples, 1)
         self.slice_positions = self.slice_positions.flatten()
+
+        # class with/without mask
+        nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 0
+        has_mask = nonzero_mask.to(torch.long)
+        has_mask = torch.nn.functional.one_hot(has_mask, num_classes=2).float()
         
-        train_size = int(0.85 * self.data.shape[0])
+        # train/test split
+        train_size = int(self.hparams.train_ratio * self.data.shape[0])
         
         self.train_x = self.data[:train_size]
         self.train_pos = self.slice_positions[:train_size]
         self.test_x = self.data[train_size:]
         self.test_pos = self.slice_positions[train_size:]
+        self.train_has_mask = has_mask[:train_size]
+        self.test_has_mask = has_mask[train_size:]
 
         print('Train shape:', self.train_x.shape) 
         print('Test shape:', self.test_x.shape)
         print('Train slice positions shape:', self.train_pos.shape)
         print('Test slice positions shape:', self.test_pos.shape)
+        print('Train has mask shape:', self.train_has_mask.shape)
+        print('Test has mask shape:', self.test_has_mask.shape)
         print('Min: {}, Max: {}'.format(self.data.min(), self.data.max()))
         
-        self.train_dataset = IdentityDataset(self.train_x, self.train_pos)
-        self.test_dataset = IdentityDataset(self.test_x, self.test_pos)
+        self.train_dataset = IdentityDataset(self.train_x, self.train_pos, self.train_has_mask)
+        self.test_dataset = IdentityDataset(self.test_x, self.test_pos, self.test_has_mask)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(

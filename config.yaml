@@ -1,13 +1,14 @@
 data:
     shape: [64, 128, 128]
     n_samples: 200
+    train_ratio: 1.0 # no valiation set, we evaluate by generating examples (test will be done after using FID/SSIM/PSNR)
     modalities:
     - flair
     - seg
     binarize: true
     npy_path: ./data/brats_preprocessed.npy
     root_path: ../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021
-    batch_size: 4
+    batch_size: 32
     shuffle: true
     num_workers: 6
 autoencoder:
@@ -23,6 +24,7 @@ autoencoder:
     - 4
     num_res_blocks: 2
     attn: [false, false, false, true]
+    num_classes: 2
     n_lf: 3
     eps_lf: 0.001
     beta_zero: 0.3
@@ -34,7 +36,7 @@ autoencoder:
         disc_start: 10001
         pixel_weight: 0.1
         perceptual_weight: 1.0
-        disc_weight: 1.0
+        disc_weight: 0.01
         disc_input_channels: 2
         disc_channels: 64
         disc_num_layers: 3

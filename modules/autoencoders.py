@@ -302,6 +302,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         channels_mult=[1, 2, 4, 4],
         num_res_blocks=2,
         attn=None,
+        num_classes=None,
         n_lf=3,
         eps_lf=0.001,
         beta_zero=0.3,
@@ -329,6 +330,13 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         )
         
         self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=None)
+        
+        if num_classes is not None:
+            self.class_encoder = nn.Sequential(
+                nn.Linear(num_classes, pemb_dim * 4),
+                nn.GELU(),
+                nn.Linear(pemb_dim * 4, pemb_dim * 2) # => norm_shift normalization
+            )
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
@@ -345,11 +353,20 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         self.save_hyperparameters()
         self.automatic_optimization = False
 
-    def forward(self, x, pos):
+    def forward(self, x, pos, y=None):
         """
         The HVAE model
         """
+        assert (y is not None) == (
+            self.hparams.num_classes is not None
+        ), "must specify y if and only if the model is class-conditional"
+        
         pemb = self.positional_encoder(pos)
+        if self.hparams.num_classes is not None:
+            cemb = self.class_encoder(y)
+            c_gamma, c_beta = torch.chunk(cemb, 2, dim=-1)
+            pemb = pemb * c_gamma + c_beta
+
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
         gamma = torch.randn_like(z0, device=x.device)
         rho = gamma / self.beta_zero_sqrt
@@ -389,7 +406,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         return recon_x, z, z0, rho, eps0, gamma, mu, log_var
 
-    def loss_function(self, recon_x, x, z0, zK, rhoK, eps0, gamma, mu, log_var):
+    def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var):
 
         logpxz = self.log_p_xz(recon_x, x, zK)  # log p(x, z_K)
         logrhoK = self.normal.log_prob(rhoK)  # log p(\rho_K)
@@ -486,16 +503,24 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # optimizers & schedulers
         ae_opt, disc_opt = self.optimizers()
 
-        x, pos = batch
+        cls = None
+        if self.hparams.num_classes is not None:
+            x, pos, cls = batch
+        else:
+            x, pos = batch
+        
         x, pos = x.type(torch.float16 if self.hparams.precision == 16 else torch.float32), pos.type(torch.long)
+        if self.hparams.num_classes is not None:
+            cls = cls.type(torch.float16 if self.hparams.precision == 16 else torch.float32)
+
         
         # x_hat=x_hat, z=z, z0=z0, rho=rho, eps=eps, gamma=gamma, mean=mean, logvar=logvar
-        recon_x, z, z0, rho, eps0, gamma, mu, log_var = self.forward(x, pos)
+        recon_x, z, z0, rho, eps0, gamma, mu, log_var = self.forward(x, pos, cls)
 
         ########################
         # Optimize Autoencoder #
         ########################
-        hvae_loss = self.loss_function(recon_x, x, z0, z, rho, eps0, gamma, mu, log_var)
+        hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, log_var)
         reg_loss, reg_log = self.regularization.autoencoder_loss(
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
@@ -538,6 +563,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         z=None,
         x=None,
         pos=None,
+        y=None,
         n_samples=1,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
@@ -550,16 +576,25 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
             if pos is None:
                 pos = torch.randint(0, self.hparams.T, (n_samples,)).to(device)
+            pemb = self.positional_encoder(pos)
+
+            if self.hparams.num_classes is not None:
+                if y is None:
+                    y = torch.randint(0, self.hparams.num_classes, (n_samples,))
+                    y = torch.nn.functional.one_hot(y, self.hparams.num_classes).to(device, dtype=torch.float32)
+                cemb = self.class_encoder(y).to(device)
+                gamma, beta = torch.chunk(cemb, 2, dim=1)
+                pemb = pemb * gamma + beta
 
             else:
                 n_samples = z.shape[0]
 
             if x is not None:
-                recon_x, z, _, _, _ = self.forward(x, pos)
+                recon_x, z, _, _, _ = self.forward(x, pos, y=y)
                 return recon_x
 
             # z.requires_grad_(True)
-            recon_x = self.decode(z, pemb=self.positional_encoder(pos))
+            recon_x = self.decode(z, pemb=pemb)
             return recon_x
 
 
