@@ -306,7 +306,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         n_lf=3,
         eps_lf=0.001,
         beta_zero=0.3,
-        reg_weight=0.05,
+        reg_weight=0.3,
         lr=1e-5,
         weight_decay=1e-6,
         lr_d_factor=1,
