@@ -296,21 +296,21 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         self,
         input_shape, # should be only the image shape (C, H, W)
         z_channels,
-        pemb_dim=None,
-        T = 64,
-        num_channels=128,
-        channels_mult=[1, 2, 4, 4],
-        num_res_blocks=2,
-        attn=None,
-        num_classes=None,
-        n_lf=3,
-        eps_lf=0.001,
-        beta_zero=0.3,
-        reg_weight=0.3,
-        lr=1e-5,
-        weight_decay=1e-6,
-        lr_d_factor=1,
-        precision=32,
+        pemb_dim        = None,
+        T               = 64,
+        num_channels    = 128,
+        channels_mult   = [1, 2, 4, 4],
+        num_res_blocks  = 2,
+        attn            = None,
+        num_classes     = None,
+        n_lf            = 3,
+        eps_lf          = 0.001,
+        beta_zero       = 0.3,
+        reg_weight      = 0.3,
+        lr              = 1e-5,
+        weight_decay    = 1e-6,
+        lr_d_factor     = 1,
+        precision       = 32,
         **kwargs
     ) -> None:
         """
@@ -406,9 +406,11 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         return recon_x, z, z0, rho, eps0, gamma, mu, log_var
 
-    def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var):
-
-        logpxz = self.log_p_xz(recon_x, x, zK)  # log p(x, z_K)
+    def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var, w=5):
+        
+        logpxz = self.log_p_xz(recon_x[:, 0, ...], x[:, 0, ...], zK)  # log p(x, z_K)
+        logpm_given_z = self.log_p_x_given_z(recon_x[:, 1:, ...], x[:, 1:, ...], zK)  # log p(m|z_K)
+        logpxz = logpxz + w * logpm_given_z
         logrhoK = self.normal.log_prob(rhoK)  # log p(\rho_K)
         logp = logpxz + logrhoK
 
@@ -521,6 +523,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # Optimize Autoencoder #
         ########################
         hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, log_var)
+
         reg_loss, reg_log = self.regularization.autoencoder_loss(
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
