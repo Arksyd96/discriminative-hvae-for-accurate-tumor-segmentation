@@ -408,15 +408,15 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
     def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var, w=5):
         
-        logpxz = self.log_p_xz(recon_x[:, 0, ...], x[:, 0, ...], zK)  # log p(x, z_K)
-        logpm_given_z = self.log_p_x_given_z(recon_x[:, 1:, ...], x[:, 1:, ...], zK)  # log p(m|z_K)
+        logpxz = self.log_p_xz(recon_x[:, 0, None, ...], x[:, 0, None, ...], zK)  # log p(x, z_K)
+        logpm_given_z = self.log_p_x_given_z(recon_x[:, 1, None, ...], x[:, 1, None, ...]).sum(dim=(1, 2, 3))  # log p(m|z_K)
         logpxz = logpxz + w * logpm_given_z
         logrhoK = self.normal.log_prob(rhoK)  # log p(\rho_K)
         logp = logpxz + logrhoK
 
         logq = self.normal.log_prob(eps0) - 0.5 * log_var.sum(dim=1)  # q(z_0|x)
 
-        return -(logp - logq).sum()
+        return -(logp - logq).mean()
 
     def log_p_x(self, x, sample_size=10):
         """
