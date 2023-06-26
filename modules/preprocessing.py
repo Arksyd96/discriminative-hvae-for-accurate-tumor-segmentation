@@ -6,8 +6,6 @@ from nibabel.processing import resample_to_output
 from tqdm import tqdm
 import os
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 class IdentityDataset(torch.utils.data.Dataset):
     def __init__(self, *data):
         self.data = data
@@ -20,16 +18,16 @@ class IdentityDataset(torch.utils.data.Dataset):
 
 class BRATSDataModule(pl.LightningDataModule):
     def __init__(self,
-        target_shape=(64, 128, 128),
-        n_samples=500,
-        train_ratio=0.8,
-        modalities=['t1', 't1ce', 't2', 'flair', 'seg'],
-        binarize=True,
-        npy_path='../data/brats_preprocessed.npy',
-        root_path='../../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021',
-        batch_size=32,
-        shuffle=True,
-        num_workers=4,
+        target_shape    = (64, 128, 128),
+        n_samples       = 500,
+        train_ratio     = 0.8,
+        modalities      = ['t1', 't1ce', 't2', 'flair', 'seg'],
+        binarize        = True,
+        npy_path        = '../data/brats_preprocessed.npy',
+        root_path       = '../../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021',
+        batch_size      = 32,
+        shuffle         = True,
+        num_workers     = 4,
         **kwargs
     ) -> None:
         assert all([m in ['t1', 't1ce', 't2', 'flair', 'seg'] for m in modalities]), 'Invalid modality!'
@@ -116,7 +114,7 @@ class BRATSDataModule(pl.LightningDataModule):
         # class with/without mask
         nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 0
         has_mask = nonzero_mask.to(torch.long)
-        has_mask = torch.nn.functional.one_hot(has_mask, num_classes=2).float()
+        # has_mask = torch.nn.functional.one_hot(has_mask, num_classes=2).float()
         
         # train/test split
         train_size = int(self.hparams.train_ratio * self.data.shape[0])
@@ -144,6 +142,15 @@ class BRATSDataModule(pl.LightningDataModule):
             self.train_dataset, 
             batch_size=self.hparams.batch_size, 
             shuffle=self.hparams.shuffle, 
+            num_workers=self.hparams.num_workers, 
+            pin_memory=True
+        )
+    
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.test_dataset, 
+            batch_size=self.hparams.batch_size, 
+            shuffle=False, 
             num_workers=self.hparams.num_workers, 
             pin_memory=True
         )

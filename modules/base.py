@@ -39,17 +39,29 @@ class ConvBlock(nn.Module):
         return self.act(self.norm(self.conv(x)))
     
 class Downsample(nn.Module):
-    def __init__(self, in_channels, out_channels, scale_factor=2) -> None:
+    def __init__(self, in_channels, out_channels, scale_factor=2, pooling=True) -> None:
         super().__init__()
-        self.downsampler = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=scale_factor, padding=1)
+        if pooling:
+            self.downsampler = nn.Sequential(
+                nn.AvgPool2d(kernel_size=2, stride=scale_factor),
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+            )
+        else:
+            self.downsampler = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=scale_factor, padding=1)
     
     def forward(self, x):
         return self.downsampler(x)
     
 class Upsample(nn.Module):
-    def __init__(self, in_channels, out_channels, scale_factor=2) -> None:
+    def __init__(self, in_channels, out_channels, scale_factor=2, transposed=False) -> None:
         super().__init__()
-        self.upsampler = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=4, stride=scale_factor, padding=1)
+        if transposed:
+            self.upsampler = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=4, stride=scale_factor, padding=1)
+        else:
+            self.upsampler = nn.Sequential(
+                nn.Upsample(scale_factor=scale_factor, mode='nearest'),
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+            )
     
     def forward(self, x):
         return self.upsampler(x)

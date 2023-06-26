@@ -37,4 +37,4 @@ pip install wandb --user
 pip install omegaconf --user
 
 # Start the calculation (safer to use srun)
-srun python3 main.py 
+srun python3 $1 

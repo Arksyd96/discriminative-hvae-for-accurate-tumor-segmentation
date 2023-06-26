@@ -1,6 +1,4 @@
-from typing import Any
 import numpy as np
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -243,11 +241,11 @@ class VariationalAutoencoder(nn.Module):
 
         # compute densities to recover p(x)
         logpxz = -bce.reshape(sample_size, -1, self.input_shape).sum(dim=2)
-        logpz = self.log_z(Z).reshape(sample_size, -1)  # log(p(z))
-        logqzx = self.normal.log_prob(Eps) - 0.5 * log_var.sum(dim=1)
+        logpz = self.log_z(z).reshape(sample_size, -1)  # log(p(z))
+        logqzx = self.normal.log_prob(eps) - 0.5 * logvar.sum(dim=1)
 
         logpx = (logpxz + logpz - logqzx).logsumexp(dim=0).mean(dim=0) - torch.log(
-            torch.Tensor([sample_size]).to(device)
+            torch.Tensor([sample_size])
         )
 
         return logpx
