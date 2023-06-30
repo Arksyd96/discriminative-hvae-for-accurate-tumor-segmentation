@@ -75,3 +75,16 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales):
     )
     assert log_probs.shape == x.shape
     return log_probs
+
+
+def dice_loss(input, target, epsilon=1e-6):
+    # Average of Dice coefficient for all batches, or for a single mask
+    assert input.size() == target.size(), "'input' and 'target' must have the same shape"
+    input, target = input.flatten(0, 1), target.flatten(0, 1)
+
+    inter = 2 * (input * target).sum(dim=(1, 2))
+    sets_sum = input.sum(dim=(1, 2)) + target.sum(dim=(1, 2))
+    sets_sum = th.where(sets_sum == 0, inter, sets_sum)
+
+    dice = (inter + epsilon) / (sets_sum + epsilon)
+    return 1 - dice.mean()

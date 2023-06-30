@@ -10,6 +10,7 @@ from .base import (
     ResidualBlock, SelfAttention
 )
 from .lpips import LPIPSWithDiscriminator
+from .losses import dice_loss
 
 class Encoder(nn.Module):
     def __init__(
@@ -227,38 +228,6 @@ class VariationalAutoencoder(nn.Module):
         """
         return self.normal.log_prob(z)
 
-# NOTE: not working
-    def log_p_x(self, x, sample_size=10):
-        """
-        Estimate log(p(x)) using importance sampling with q(z|x)
-        """
-        moments = self.encode(x)
-        z, mu, logvar, eps = DiagonalGaussianDistribution(moments).sample(return_all=True)
-        recon_x = self.decode(z)
-        bce = F.binary_cross_entropy(
-            recon_x, x.repeat(sample_size, 1, 1, 1), reduction="none"
-        ).sum(dim=(1, 2, 3))
-
-        # compute densities to recover p(x)
-        logpxz = -bce.reshape(sample_size, -1, self.input_shape).sum(dim=2)
-        logpz = self.log_z(z).reshape(sample_size, -1)  # log(p(z))
-        logqzx = self.normal.log_prob(eps) - 0.5 * logvar.sum(dim=1)
-
-        logpx = (logpxz + logpz - logqzx).logsumexp(dim=0).mean(dim=0) - torch.log(
-            torch.Tensor([sample_size])
-        )
-
-        return logpx
-# NOTE: not working
-    def log_p_z_given_x(self, z, recon_x, x, sample_size=10):
-        """
-        Estimate log(p(z|x)) using Bayes rule and Importance Sampling for log(p(x))
-        """
-        logpx = self.log_p_x(x, sample_size)
-        lopgxz = self.log_p_x_given_z(recon_x, x)
-        logpz = self.log_z(z)
-        return lopgxz + logpz - logpx
-
     def log_p_xz(self, recon_x, x, z):
         """
         Estimate log(p(x, z)) using Bayes rule
@@ -292,15 +261,14 @@ class VariationalAutoencoder(nn.Module):
 class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
     def __init__(
         self,
-        input_shape, # should be only the image shape (C, H, W)
+        input_shape,    # should be only the image shape (C, H, W)
         z_channels,
         pemb_dim        = None,
-        T               = 64,
+        max_period      = 64,
         num_channels    = 128,
         channels_mult   = [1, 2, 4, 4],
         num_res_blocks  = 2,
         attn            = None,
-        num_classes     = None,
         n_lf            = 3,
         eps_lf          = 0.001,
         beta_zero       = 0.3,
@@ -327,14 +295,8 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
         
-        self.positional_encoder = TimePositionalEmbedding(pemb_dim, T, local_device=None)
-        
-        if num_classes is not None:
-            self.class_encoder = nn.Sequential(
-                nn.Linear(num_classes, pemb_dim * 4),
-                nn.GELU(),
-                nn.Linear(pemb_dim * 4, pemb_dim * 2) # => norm_shift normalization
-            )
+            
+        self.positional_encoder = TimePositionalEmbedding(pemb_dim, max_period) if pemb_dim is not None else nn.Identity()
 
         self.vae_forward = super().forward
         self.n_lf = n_lf
@@ -348,30 +310,24 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         self.regularization = LPIPSWithDiscriminator(**kwargs['loss'])
 
+        self.precision = torch.float16 if precision == 16 else torch.float32
+
         self.save_hyperparameters()
         self.automatic_optimization = False
 
-    def forward(self, x, pos, y=None):
+    def forward(self, x, pos=None):
         """
         The HVAE model
         """
-        assert (y is not None) == (
-            self.hparams.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
-        
-        pemb = self.positional_encoder(pos)
-        if self.hparams.num_classes is not None:
-            cemb = self.class_encoder(y)
-            c_gamma, c_beta = torch.chunk(cemb, 2, dim=-1)
-            pemb = pemb * c_gamma + c_beta
+        pemb = None
+        if pos is not None:
+            pemb = self.positional_encoder(pos)
 
         recon_x, z0, mu, log_var, eps0 = self.vae_forward(x, pemb)
         gamma = torch.randn_like(z0, device=x.device)
         rho = gamma / self.beta_zero_sqrt
         z = z0
         beta_sqrt_old = self.beta_zero_sqrt
-
-        recon_x = self.decode(z, pemb)
 
         for k in range(self.n_lf):
 
@@ -404,75 +360,14 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
 
         return recon_x, z, z0, rho, eps0, gamma, mu, log_var
 
-    def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var, w=3):
-        
-        logpxz = self.log_p_xz(recon_x[:, 0, None, ...], x[:, 0, None, ...], zK)  # log p(x, z_K)
-        logpm_given_z = self.log_p_x_given_z(recon_x[:, 1, None, ...], x[:, 1, None, ...]) # log p(m|z_K)
-        logpxz = logpxz + w * logpm_given_z
+    def loss_function(self, recon_x, x, zK, rhoK, eps0, log_var):
+        logpxz = self.log_p_xz(recon_x, x, zK)  # log p(x, z_K)
         logrhoK = self.normal.log_prob(rhoK)  # log p(\rho_K)
         logp = logpxz + logrhoK
 
         logq = self.normal.log_prob(eps0) - 0.5 * log_var.sum(dim=1)  # q(z_0|x)
 
         return -(logp - logq).mean()
-
-    def log_p_x(self, x, sample_size=10):
-        """
-        Estimate log(p(x)) using importance sampling on q(z|x)
-        """
-        mu, log_var = self.encode(x.view(-1, self.input_dim))
-        Eps = torch.randn(sample_size, x.size()[0], self.latent_dim, device=x.device)
-        Z = (mu + Eps * torch.exp(0.5 * log_var)).reshape(-1, self.latent_dim)
-
-        recon_X = self.decode(Z)
-
-        gamma = torch.randn_like(Z, device=x.device)
-        rho = gamma / self.beta_zero_sqrt
-        rho0 = rho
-        beta_sqrt_old = self.beta_zero_sqrt
-        X_rep = x.repeat(sample_size, 1, 1, 1).reshape(-1, self.input_dim)
-
-        for k in range(self.n_lf):
-
-            U = self.hamiltonian(recon_X, X_rep, Z, rho)
-            g = grad(U, Z, create_graph=True)[0]
-
-            # step 1
-            rho_ = rho - (self.eps_lf / 2) * g
-
-            # step 2
-            Z = Z + self.eps_lf * rho_
-
-            recon_X = self.decode(Z)
-
-            U = self.hamiltonian(recon_X, X_rep, Z, rho_)
-            g = grad(U, Z, create_graph=True)[0]
-
-            # step 3
-            rho__ = rho_ - (self.eps_lf / 2) * g
-
-            # tempering
-            beta_sqrt = self._tempering(k + 1, self.n_lf)
-            rho = (beta_sqrt_old / beta_sqrt) * rho__
-            beta_sqrt_old = beta_sqrt
-
-        bce = F.binary_cross_entropy(recon_X, X_rep, reduction="none")
-
-        # compute densities to recover p(x)
-        logpxz = -bce.reshape(sample_size, -1, self.input_dim).sum(dim=2)  # log(p(X|Z))
-
-        logpz = self.log_z(Z).reshape(sample_size, -1)  # log(p(Z))
-
-        logrho0 = self.normal.log_prob(rho0 * self.beta_zero_sqrt).reshape(
-            sample_size, -1
-        )  # log(p(rho0))
-        logrho = self.normal.log_prob(rho).reshape(sample_size, -1)  # log(p(rho_K))
-        logqzx = self.normal.log_prob(Eps) - 0.5 * log_var.sum(dim=1)  # q(Z_0|X)
-
-        logpx = (logpxz + logpz + logrho - logrho0 - logqzx).logsumexp(dim=0).mean(
-            dim=0
-        ) - torch.log(torch.Tensor([sample_size]).to(x.device))
-        return logpx
 
     def hamiltonian(self, recon_x, x, z):
         """
@@ -497,36 +392,30 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             covariance_matrix=torch.eye(self.latent_dim).to(self.device),
         )
 
-        self.positional_encoder.embedding = self.positional_encoder.embedding.to(self.device)
+        self.positional_encoder = self.positional_encoder.to(self.device)
     
     def training_step(self, batch, batch_idx):
         # optimizers & schedulers
         ae_opt, disc_opt = self.optimizers()
 
-        cls = None
-        if self.hparams.num_classes is not None:
-            x, pos, cls = batch
-        else:
-            x, pos = batch
-        
-        x, pos = x.type(torch.float16 if self.hparams.precision == 16 else torch.float32), pos.type(torch.long)
-        if self.hparams.num_classes is not None:
-            cls = cls.type(torch.float16 if self.hparams.precision == 16 else torch.float32)
-
-        
+        # data
+        x = batch[0]
+        x = x.type(self.precision)
+    
         # x_hat=x_hat, z=z, z0=z0, rho=rho, eps=eps, gamma=gamma, mean=mean, logvar=logvar
-        recon_x, z, z0, rho, eps0, gamma, mu, log_var = self.forward(x, pos, cls)
+        recon_x, z, z0, rho, eps0, gamma, mu, logvar = self.forward(x)
 
         ########################
         # Optimize Autoencoder #
         ########################
-        hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, log_var)
+        hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, logvar)
+        seg_loss = dice_loss(recon_x[:, 1, None, ...].round(), x[:, 1, None, ...])
 
         reg_loss, reg_log = self.regularization.autoencoder_loss(
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
         
-        ae_loss = (1 - self.reg_weight) * hvae_loss + self.reg_weight * reg_loss
+        ae_loss = (1 - self.reg_weight) * (1e-4 * hvae_loss + seg_loss) + self.reg_weight * reg_loss
         ae_opt.zero_grad(set_to_none=True)
         self.manual_backward(ae_loss)
         ae_opt.step()
@@ -545,9 +434,10 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # disc_scheduler.step()
 
         # logging
-        self.log('hvae_loss', hvae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log_dict(reg_log, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log_dict(disc_log, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log('dice_loss', seg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log('hvae_loss', hvae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log_dict(reg_log, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log_dict(disc_log, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
     
     def configure_optimizers(self):
         ae_opt = torch.optim.AdamW(list(self.encoder.parameters()) + 
@@ -564,7 +454,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         z=None,
         x=None,
         pos=None,
-        y=None,
         n_samples=1,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
@@ -575,23 +464,12 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             if z is None:
                 z = self.normal.sample(sample_shape=(n_samples,)).to(device)
 
-            if pos is None:
-                pos = torch.randint(0, self.hparams.T, (n_samples,)).to(device)
-            pemb = self.positional_encoder(pos)
-
-            if self.hparams.num_classes is not None:
-                if y is None:
-                    y = torch.randint(0, self.hparams.num_classes, (n_samples,))
-                    y = torch.nn.functional.one_hot(y, self.hparams.num_classes).to(device, dtype=torch.float32)
-                cemb = self.class_encoder(y).to(device)
-                gamma, beta = torch.chunk(cemb, 2, dim=1)
-                pemb = pemb * gamma + beta
-
-            else:
-                n_samples = z.shape[0]
+            pemb = None
+            if pos is not None:
+                pemb = self.positional_encoder(pos)
 
             if x is not None:
-                recon_x, z, _, _, _ = self.forward(x, pos, y=y)
+                recon_x, z, _, _, _ = self.forward(x, pos)
                 return recon_x
 
             # z.requires_grad_(True)

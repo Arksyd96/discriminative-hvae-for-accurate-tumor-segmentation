@@ -1,48 +1,41 @@
 data:
-    target_shape: [64, 256, 256]
-    n_samples: 1000
-    train_ratio: 0.8 # no valiation set, we evaluate by generating examples (test will be done after using FID/SSIM/PSNR)
-    modalities:
-    - flair
-    - seg
-    binarize: true
-    npy_path: ./data/brats_preprocessed.npy
-    root_path: ../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021
-    batch_size: 8
-    shuffle: true
-    num_workers: 6
+    target_shape:   [64, 128, 128]
+    n_samples:      50
+    train_ratio:    1.0 # no valiation set, we evaluate by generating examples (test will be done after using FID/SSIM/PSNR)
+    modalities:     ['flair', 'seg']
+    binarize:       true
+    npy_path:       ./data/brats_preprocessed.npy
+    root_path:      ../common_data/RSNA_ASNR_MICCAI_BraTS2021_TrainingData_16July2021
+    batch_size:     16
+    shuffle:        true
+    num_workers:    6
 autoencoder:
-    input_shape: [2, 128, 128] # channels, height, width
-    z_channels: 2
-    pemb_dim: 128
-    T: 64
-    num_channels: 128
-    channels_mult:
-    - 1
-    - 2
-    - 4
-    - 4
+    input_shape:    [2, 128, 128] # channels, height, width
+    z_channels:     2  
+    pemb_dim:       # None
+    max_period:     64
+    num_channels:   128
+    channels_mult:  [1, 2, 3, 4, 4] # => after downsampling [64, 32, 16, 8, 8]
     num_res_blocks: 2
-    attn: [false, false, false, true]
-    num_classes: 2
-    n_lf: 3
-    eps_lf: 0.001
-    beta_zero: 0.3
-    reg_weight: 0.5
-    lr: 0.00001
-    weight_decay: 0.000001
-    lr_d_factor: 1.0
-    precision: 32
+    attn:           [false, false, true, true, false]
+    n_lf:           3
+    eps_lf:         0.001
+    beta_zero:      0.3
+    reg_weight:     0.3
+    lr:             1.e-5
+    weight_decay:   1.e-7
+    lr_d_factor:    1.0
+    precision:      32
     loss:
-        disc_start: 40001
-        pixel_weight: 0.1
-        perceptual_weight: 1.0
-        disc_weight: 1.0
+        disc_start:         30001
+        pixel_weight:       0.5
+        perceptual_weight:  1.0
+        disc_weight:        1.0
         disc_input_channels: 2
-        disc_channels: 64
-        disc_num_layers: 3
-        disc_factor: 1.0
-        logvar_init: 0.0
+        disc_channels:      64
+        disc_num_layers:    3
+        disc_factor:        1.0
+        logvar_init:        0.0
 callbacks:
     checkpoint:
         monitor: 

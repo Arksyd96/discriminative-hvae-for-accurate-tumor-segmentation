@@ -104,58 +104,22 @@ class BRATSDataModule(pl.LightningDataModule):
         D, W, H = self.hparams.target_shape
         self.data = self.data.reshape(self.hparams.n_samples * D, -1, W, H)
 
-        # keeping track on slice positions for positional embedding
-        self.slice_positions = torch.arange(D)[None, :].repeat(self.hparams.n_samples, 1)
-        self.slice_positions = self.slice_positions.flatten()
-
-        # class with/without mask
+        # selecting only nonzero masks
         nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 0
-        has_mask = nonzero_mask.to(torch.long)
-        # has_mask = torch.nn.functional.one_hot(has_mask, num_classes=2).float()
+        self.data = self.data[nonzero_mask]
 
-        # balance the number of positive and negative samples in training
-        if self.hparams.balance:
-            print('Balancing the number of positive and negative samples...')
-            idx_pos = torch.where(has_mask == 1)[0]
-            idx_neg = torch.where(has_mask == 0)[0]
-            max = min(idx_pos.__len__(), idx_neg.__len__())
-            idx_pos, idx_neg = idx_pos[:max], idx_neg[:max]
-            idx = torch.cat((idx_pos, idx_neg))
-            self.data = self.data[idx]
-            self.slice_positions = self.slice_positions[idx]
-            self.has_mask = has_mask[idx]
-
-        # asserting positives == negatives
-        assert torch.sum(self.has_mask) == torch.sum(1 - self.has_mask)
-
-        # shuffling the dataset
-        idx = torch.randperm(self.data.shape[0])
-        self.data = self.data[idx]
-        self.slice_positions = self.slice_positions[idx]
-        self.has_mask = self.has_mask[idx]
-        
         # train/test split
         train_size = int(self.hparams.train_ratio * self.data.shape[0])
         
         self.train_x = self.data[:train_size]
-        self.train_pos = self.slice_positions[:train_size]
         self.test_x = self.data[train_size:]
-        self.test_pos = self.slice_positions[train_size:]
-        self.train_has_mask = self.has_mask[:train_size]
-        self.test_has_mask = self.has_mask[train_size:]
 
         print('Train shape:', self.train_x.shape) 
         print('Test shape:', self.test_x.shape)
-        print('Train slice positions shape:', self.train_pos.shape)
-        print('Test slice positions shape:', self.test_pos.shape)
-        print('Train has mask shape:', self.train_has_mask.shape)
-        print('Positive samples in train:', self.train_has_mask.sum())
-        print('Negative samples in train:', self.train_has_mask.shape[0] - self.train_has_mask.sum())
-        print('Test has mask shape:', self.test_has_mask.shape)
         print('Min: {}, Max: {}'.format(self.data.min(), self.data.max()))
         
-        self.train_dataset = IdentityDataset(self.train_x, self.train_pos, self.train_has_mask)
-        self.test_dataset = IdentityDataset(self.test_x, self.test_pos, self.test_has_mask)
+        self.train_dataset = IdentityDataset(self.train_x)
+        self.test_dataset = IdentityDataset(self.test_x)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
@@ -166,12 +130,4 @@ class BRATSDataModule(pl.LightningDataModule):
             pin_memory=True
         )
     
-    def val_dataloader(self):
-        return torch.utils.data.DataLoader(
-            self.test_dataset, 
-            batch_size=self.hparams.batch_size, 
-            shuffle=False, 
-            num_workers=self.hparams.num_workers, 
-            pin_memory=True
-        )
     
