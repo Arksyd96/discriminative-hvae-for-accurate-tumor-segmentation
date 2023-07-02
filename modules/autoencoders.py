@@ -409,13 +409,12 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # Optimize Autoencoder #
         ########################
         hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, logvar)
-        seg_loss = dice_loss(recon_x[:, 1, None, ...].round(), x[:, 1, None, ...])
 
         reg_loss, reg_log = self.regularization.autoencoder_loss(
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
         )
         
-        ae_loss = (1 - self.reg_weight) * (1e-4 * hvae_loss + seg_loss) + self.reg_weight * reg_loss
+        ae_loss = (1 - self.reg_weight) * hvae_loss + self.reg_weight * reg_loss
         ae_opt.zero_grad(set_to_none=True)
         self.manual_backward(ae_loss)
         ae_opt.step()
@@ -434,7 +433,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # disc_scheduler.step()
 
         # logging
-        self.log('dice_loss', seg_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log('hvae_loss', hvae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log_dict(reg_log, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log_dict(disc_log, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
