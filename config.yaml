@@ -11,24 +11,24 @@ data:
     num_workers:    6
 autoencoder:
     input_shape:    [2, 128, 128] # channels, height, width
-    z_channels:     2  
+    z_channels:     4  
     pemb_dim:       # None
     max_period:     64
     num_channels:   128
-    channels_mult:  [1, 2, 3, 4, 4] # => after downsampling [64, 32, 16, 8, 8]
+    channels_mult:  [1, 2, 3, 4] # => after downsampling [64, 32, 16, 16]
     num_res_blocks: 2
-    attn:           [false, false, true, true, false]
+    attn:           [false, false, true, true]
     n_lf:           3
     eps_lf:         0.001
     beta_zero:      0.3
-    reg_weight:     0.3
+    reg_weight:     0.05
     lr:             1.e-5
     weight_decay:   1.e-7
     lr_d_factor:    1.0
     precision:      32
     loss:
-        disc_start:         30001
-        pixel_weight:       0.5
+        disc_start:         15001
+        pixel_weight:       1.0
         perceptual_weight:  1.0
         disc_weight:        1.0
         disc_input_channels: 2
