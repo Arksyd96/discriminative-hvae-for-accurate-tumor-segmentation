@@ -105,7 +105,7 @@ class BRATSDataModule(pl.LightningDataModule):
         self.data = self.data.reshape(self.hparams.n_samples * D, -1, W, H)
 
         # selecting only nonzero masks
-        nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 0
+        nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 150
         self.data = self.data[nonzero_mask]
 
         # train/test split
