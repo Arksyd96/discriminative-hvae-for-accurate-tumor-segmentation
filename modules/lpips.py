@@ -225,7 +225,7 @@ class LPIPSWithDiscriminator(nn.Module):
         disc_weight = disc_weight * self.disc_weight
         return disc_weight
     
-    def autoencoder_loss(self, x, recon_x, global_step, last_layer=None, weights=None, split='train'):
+    def autoencoder_loss(self, x, recon_x, generated, global_step, last_layer=None, weights=None, split='train'):
         # l1_loss
         l1_loss = F.l1_loss(recon_x, x, reduction='none') * self.pixel_weight
 
@@ -242,7 +242,7 @@ class LPIPSWithDiscriminator(nn.Module):
         nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
 
         # discriminator loss
-        logits_fake = self.discriminator(recon_x.contiguous())
+        logits_fake = self.discriminator(generated.contiguous())
         g_loss = -torch.mean(logits_fake)
 
         disc_weight = torch.tensor(0.0)

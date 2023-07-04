@@ -63,12 +63,12 @@ if __name__ == "__main__":
     # training
     trainer = pl.Trainer(
         logger=logger,
-        strategy="ddp_find_unused_parameters_true",
-        devices=4,
-        num_nodes=2,
+        # strategy="ddp_find_unused_parameters_true",
+        # devices=4,
+        # num_nodes=2,
         accelerator='gpu',
         precision=32,
-        max_epochs=7000,
+        max_epochs=5000,
         log_every_n_steps=1,
         num_sanity_val_steps=0,
         enable_progress_bar=True,
