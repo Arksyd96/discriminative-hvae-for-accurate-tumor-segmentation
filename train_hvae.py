@@ -42,9 +42,6 @@ if __name__ == "__main__":
         # resume="must"
     )
 
-    run_id = logger.experiment.id
-    print(f'Run ID: {run_id}')
-
     # model
     model = HamiltonianAutoencoder(**cfg.autoencoder)
     
@@ -60,7 +57,7 @@ if __name__ == "__main__":
     # callbacks
     checkpoint_callback = ModelCheckpoint(
         **cfg.callbacks.checkpoint,
-        filename='ckpt-{}'.format(run_id),
+        filename='ckpt-{epoch}',
     )
     
     # training
