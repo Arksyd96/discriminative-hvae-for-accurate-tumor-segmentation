@@ -1,7 +1,6 @@
 data:
     target_shape:   [64, 128, 128]
-    n_samples:      30
-    train_ratio:    1.0 # no valiation set, we evaluate by generating examples (test will be done after using FID/SSIM/PSNR)
+    n_samples:      50
     modalities:     ['flair', 'seg']
     binarize:       true
     npy_path:       ./data/brats_preprocessed.npy

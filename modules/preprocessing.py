@@ -20,7 +20,6 @@ class BRATSDataModule(pl.LightningDataModule):
     def __init__(self,
         target_shape    = (64, 128, 128),
         n_samples       = 500,
-        train_ratio     = 0.8,
         modalities      = ['t1', 't1ce', 't2', 'flair', 'seg'],
         binarize        = True,
         balance         = True,
@@ -90,38 +89,46 @@ class BRATSDataModule(pl.LightningDataModule):
     def setup(self, stage='fit'):
         print('Loading dataset from npy file...')
         data = torch.from_numpy(np.load(self.hparams.npy_path))
-
-        # normalize the data [0, 1] example by example
-        data[:, 0] = (data[:, 0] - data[:, 0].min()) / (data[:, 0].max() - data[:, 0].min())
         data = data.permute(0, 4, 1, 2, 3) # depth first
-            
+
         # switching to 2D
         D, W, H = self.hparams.target_shape
         data = data.reshape(data.shape[0] * D, -1, W, H)
 
-        # fixing an approximate amount of data to use (from n_samples volumes and removing the empty masks)
-        max_size = data[:self.hparams.n_samples * D, 1, ...].sum(axis=(1, 2)) > 0
-        max_size = max_size.sum()
+        # normalize the data [0, 1] example by example (only images)
+        for idx in tqdm(range(data.shape[0])):
+            if data[idx, 0].max() != 0:
+                data[idx, 0] = (data[idx, 0] - data[idx, 0].min()) / (data[idx, 0].max() - data[idx, 0].min())
 
-        # removing masks that are too small < 150
-        nonzero_mask = torch.sum(data[:, 1, ...], dim=(1, 2)) > 150
-        data = data[nonzero_mask]
+        # removing empty slices (no tumors)
+        data = data[data[:, 1].sum(dim=(1, 2)) != 0]
 
-        # selecting only authorized amount of data
-        data = data[:max_size]
+        # balancing the dataset according to the size of the tumors
+        max_tumor_size = data[:, 1].sum(dim=(1, 2)).max()
+        bins = np.arange(0, max_tumor_size, 25) # 25 is the bin size
+        slices_per_level = self.hparams.n_samples * D // len(bins) 
+        print('Max tumor size: {}, Slices per level: {}, Bins: {}'.format(max_tumor_size, slices_per_level, len(bins)))
 
-        # train/test split
-        train_size = int(self.hparams.train_ratio * data.shape[0])
+        for idx in tqdm(range(bins.__len__() - 1)):
+            curr_bin = data[(data[:, 1].sum(dim=(1, 2)) >= bins[idx]) & (data[:, 1].sum(dim=(1, 2)) < bins[idx + 1])]
+            curr_bin = curr_bin[:slices_per_level]
+
+            if idx == 0:
+                data_balanced = curr_bin
+            else:
+                data_balanced = torch.cat([data_balanced, curr_bin], dim=0)
+
+        # fill the empty space with random slices that have at least a tumor size of 400
+        if data_balanced.shape[0] < self.hparams.n_samples * D:
+            n_samples = self.hparams.n_samples * D - data_balanced.shape[0]
+            random_samples = data[(data[:, 1].sum(dim=(1, 2)) >= 400)]
+            random_samples = random_samples[torch.randperm(random_samples.shape[0])][:n_samples]
+            data_balanced = torch.cat([data_balanced, random_samples], dim=0)
+
+        print('Train shape:', data_balanced.shape) 
+        print('Min: {}, Max: {}'.format(data_balanced.min(), data_balanced.max()))
         
-        self.train_x = data[:train_size]
-        self.test_x = data[train_size:]
-
-        print('Train shape:', self.train_x.shape) 
-        print('Test shape:', self.test_x.shape)
-        print('Min: {}, Max: {}'.format(data.min(), data.max()))
-        
-        self.train_dataset = IdentityDataset(self.train_x)
-        self.test_dataset = IdentityDataset(self.test_x)
+        self.train_dataset = IdentityDataset(data_balanced)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
