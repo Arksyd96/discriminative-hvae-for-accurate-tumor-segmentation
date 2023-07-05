@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # callbacks
     checkpoint_callback = ModelCheckpoint(
         **cfg.callbacks.checkpoint,
-        filename='ckpt-{run_id}',
+        filename='ckpt-{}'.format(run_id),
     )
     
     # training

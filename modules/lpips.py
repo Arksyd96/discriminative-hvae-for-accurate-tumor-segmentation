@@ -268,6 +268,12 @@ class LPIPSWithDiscriminator(nn.Module):
         return loss, log
     
     def discriminator_loss(self, x, recon_x, generated, global_step):
+        default_return = torch.tensor(0.0), {
+            "d_loss": torch.tensor(0.0),
+            "logits_real": torch.tensor(0.0),
+            "logits_fake": torch.tensor(0.0)
+        }
+
         if global_step > self.disc_start:
             logits_real = self.discriminator(x.contiguous().detach())
             logits_fake = self.discriminator(generated.contiguous().detach())
@@ -280,16 +286,11 @@ class LPIPSWithDiscriminator(nn.Module):
                 "logits_real": logits_real.detach().mean(),
                 "logits_fake": logits_fake.detach().mean()
             }
+
+            return d_loss, log
+        return default_return
         
-        else:
-            log = {
-                "d_loss": torch.tensor(0.0),
-                "logits_real": torch.tensor(0.0),
-                "logits_fake": torch.tensor(0.0)
-            }
-        
-        return d_loss, log
-        
+
     def forward(self, codebook_loss, x, recon_x, z_i, optimizer_idx, global_step, last_layer=None):
         if optimizer_idx == 0:
             loss, log = self.autoencoder_loss(codebook_loss, x, recon_x, z_i, global_step, last_layer)
