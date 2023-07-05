@@ -398,9 +398,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # optimizers & schedulers
         ae_opt, disc_opt = self.optimizers()
 
-        # data
-        x = batch[0]
-        x = x.type(self.precision)
+        x = batch[0].type(self.precision)
     
         # x_hat=x_hat, z=z, z0=z0, rho=rho, eps=eps, gamma=gamma, mean=mean, logvar=logvar
         recon_x, z, z0, rho, eps0, gamma, mu, logvar = self.forward(x)
@@ -409,7 +407,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # Optimize Autoencoder #
         ########################
         hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, logvar)
-
         generated = self.sample_img(n_samples=x.shape[0])
 
         reg_loss, reg_log = self.regularization.autoencoder_loss(
@@ -425,10 +422,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         ##########################
         # Optimize Discriminator #
         ##########################
-        # sampling an image
-        
-
-        disc_loss, disc_log = self.regularization.discriminator_loss(x, generated, self.global_step)
+        disc_loss, disc_log = self.regularization.discriminator_loss(x, recon_x, generated, self.global_step)
         disc_opt.zero_grad(set_to_none=True)
         self.manual_backward(disc_loss)
         disc_opt.step()
@@ -445,7 +439,7 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
                                    list(self.positional_encoder.parameters()),
                                    lr=self.hparams.lr, weight_decay=self.hparams.weight_decay, betas=(0.5, 0.9))
         disc_opt = torch.optim.AdamW(list(self.regularization.discriminator.parameters()), 
-                                    lr=self.hparams.lr * self.hparams.lr_d_factor, weight_decay=self.hparams.weight_decay, betas=(0.5, 0.9))
+                                    lr=self.hparams.lr * self.hparams.lr_d_factor, betas=(0.5, 0.9))
 
         return [ae_opt, disc_opt]
     

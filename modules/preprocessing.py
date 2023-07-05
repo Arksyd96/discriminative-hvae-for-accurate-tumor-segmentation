@@ -88,35 +88,37 @@ class BRATSDataModule(pl.LightningDataModule):
             print('Dataset already exists at {}'.format(self.hparams.npy_path))
         
     def setup(self, stage='fit'):
-        assert os.path.exists(self.hparams.npy_path), 'npy data file does not exist!'
-        
         print('Loading dataset from npy file...')
-        self.data = torch.from_numpy(np.load(self.hparams.npy_path))
-        self.data = self.data[:self.hparams.n_samples]
-        
+        data = torch.from_numpy(np.load(self.hparams.npy_path))
+
         # normalize the data [0, 1] example by example
-        for idx in range(self.data.shape[0]):
-            self.data[idx][0] = (self.data[idx][0] - self.data[idx][0].min()) / (self.data[idx][0].max() - self.data[idx][0].min())
-
-        self.data = self.data.permute(0, 4, 1, 2, 3) # depth first
+        data[:, 0] = (data[:, 0] - data[:, 0].min()) / (data[:, 0].max() - data[:, 0].min())
+        data = data.permute(0, 4, 1, 2, 3) # depth first
             
-        # if switching to 2D for autoencoder training
+        # switching to 2D
         D, W, H = self.hparams.target_shape
-        self.data = self.data.reshape(self.hparams.n_samples * D, -1, W, H)
+        data = data.reshape(data.shape[0] * D, -1, W, H)
 
-        # selecting only nonzero masks
-        nonzero_mask = torch.sum(self.data[:, 1, ...], dim=(1, 2)) > 150
-        self.data = self.data[nonzero_mask]
+        # fixing an approximate amount of data to use (from n_samples volumes and removing the empty masks)
+        max_size = data[:self.hparams.n_samples * D, 1, ...].sum(axis=(1, 2)) > 0
+        max_size = max_size.sum()
+
+        # removing masks that are too small < 150
+        nonzero_mask = torch.sum(data[:, 1, ...], dim=(1, 2)) > 150
+        data = data[nonzero_mask]
+
+        # selecting only authorized amount of data
+        data = data[:max_size]
 
         # train/test split
-        train_size = int(self.hparams.train_ratio * self.data.shape[0])
+        train_size = int(self.hparams.train_ratio * data.shape[0])
         
-        self.train_x = self.data[:train_size]
-        self.test_x = self.data[train_size:]
+        self.train_x = data[:train_size]
+        self.test_x = data[train_size:]
 
         print('Train shape:', self.train_x.shape) 
         print('Test shape:', self.test_x.shape)
-        print('Min: {}, Max: {}'.format(self.data.min(), self.data.max()))
+        print('Min: {}, Max: {}'.format(data.min(), data.max()))
         
         self.train_dataset = IdentityDataset(self.train_x)
         self.test_dataset = IdentityDataset(self.test_x)

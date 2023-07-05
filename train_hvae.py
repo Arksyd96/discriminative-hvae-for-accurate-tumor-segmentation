@@ -38,9 +38,12 @@ if __name__ == "__main__":
     logger = wandb_logger.WandbLogger(
         project='discrimnative-hvae-for-accurate-tumor-segmentation', 
         name='Training HVAE',
-        # id='24hyhi7b',
+        # id='24hyhi7b',    # in case we want to resume
         # resume="must"
     )
+
+    run_id = logger.experiment.id
+    print(f'Run ID: {run_id}')
 
     # model
     model = HamiltonianAutoencoder(**cfg.autoencoder)
@@ -57,15 +60,15 @@ if __name__ == "__main__":
     # callbacks
     checkpoint_callback = ModelCheckpoint(
         **cfg.callbacks.checkpoint,
-        filename='ckpt-{epoch}',
+        filename='ckpt-{run_id}',
     )
     
     # training
     trainer = pl.Trainer(
         logger=logger,
-        # strategy="ddp_find_unused_parameters_true",
-        # devices=4,
-        # num_nodes=2,
+        strategy="ddp_find_unused_parameters_true",
+        devices=4,
+        num_nodes=2,
         accelerator='gpu',
         precision=32,
         max_epochs=5000,

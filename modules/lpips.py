@@ -241,9 +241,10 @@ class LPIPSWithDiscriminator(nn.Module):
         weighted_nll_loss = torch.sum(weighted_nll_loss) / weighted_nll_loss.shape[0]
         nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
 
-        # discriminator loss
-        logits_fake = self.discriminator(generated.contiguous())
-        g_loss = -torch.mean(logits_fake)
+        # discriminator loss term
+        logits_fake_recon = self.discriminator(recon_x.contiguous())
+        logits_fake_sample = self.discriminator(generated.contiguous())
+        g_loss = -torch.mean(logits_fake_recon) - torch.mean(logits_fake_sample)
 
         disc_weight = torch.tensor(0.0)
         if global_step > self.disc_start:
@@ -266,18 +267,26 @@ class LPIPSWithDiscriminator(nn.Module):
         
         return loss, log
     
-    def discriminator_loss(self, x, recon_x, global_step):
-        logits_real = self.discriminator(x.contiguous().detach())
-        logits_fake = self.discriminator(recon_x.contiguous().detach())
+    def discriminator_loss(self, x, recon_x, generated, global_step):
+        if global_step > self.disc_start:
+            logits_real = self.discriminator(x.contiguous().detach())
+            logits_fake = self.discriminator(generated.contiguous().detach())
+            logits_recon = self.discriminator(recon_x.contiguous().detach())
 
-        disc_factor = self.disc_factor if global_step > self.disc_start else 0.0
-        d_loss = disc_factor * hinge_loss(logits_real, logits_fake)
+            d_loss = self.disc_factor * (hinge_loss(logits_real, logits_fake) + hinge_loss(logits_real, logits_recon))
 
-        log = {
-            "d_loss": d_loss.clone().detach().mean(),
-            "logits_real": logits_real.detach().mean(),
-            "logits_fake": logits_fake.detach().mean()
-        }
+            log = {
+                "d_loss": d_loss.clone().detach().mean(),
+                "logits_real": logits_real.detach().mean(),
+                "logits_fake": logits_fake.detach().mean()
+            }
+        
+        else:
+            log = {
+                "d_loss": torch.tensor(0.0),
+                "logits_real": torch.tensor(0.0),
+                "logits_fake": torch.tensor(0.0)
+            }
         
         return d_loss, log
         

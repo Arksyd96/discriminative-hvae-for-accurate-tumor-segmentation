@@ -15,9 +15,9 @@ autoencoder:
     pemb_dim:       # None
     max_period:     64
     num_channels:   128
-    channels_mult:  [1, 2, 3, 4] # => after downsampling [64, 32, 16, 16]
+    channels_mult:  [1, 2, 4, 4] # => after downsampling [64, 32, 16, 16]
     num_res_blocks: 2
-    attn:           [false, false, false, true]
+    attn:           [false, false, true, false]
     n_lf:           3
     eps_lf:         0.001
     beta_zero:      0.3
@@ -27,7 +27,7 @@ autoencoder:
     lr_d_factor:    1.0
     precision:      32
     loss:
-        disc_start:         30001
+        disc_start:         50001
         pixel_weight:       1.0
         perceptual_weight:  1.0
         disc_weight:        1.0
@@ -41,4 +41,4 @@ callbacks:
         monitor: 
         dirpath: ./checkpoints
         save_top_k: 1
-        every_n_epochs: 10
+        every_n_epochs: 25
