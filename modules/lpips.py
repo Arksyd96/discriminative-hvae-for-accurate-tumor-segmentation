@@ -225,7 +225,7 @@ class LPIPSWithDiscriminator(nn.Module):
         disc_weight = disc_weight * self.disc_weight
         return disc_weight
     
-    def autoencoder_loss(self, x, recon_x, generated, global_step, last_layer=None, weights=None, split='train'):
+    def autoencoder_loss(self, x, recon_x, global_step, last_layer=None, weights=None, split='train'):
         # l1_loss
         l1_loss = F.l1_loss(recon_x, x, reduction='none') * self.pixel_weight
 
@@ -243,8 +243,7 @@ class LPIPSWithDiscriminator(nn.Module):
 
         # discriminator loss term
         logits_fake_recon = self.discriminator(recon_x.contiguous())
-        logits_fake_sample = self.discriminator(generated.contiguous())
-        g_loss = -torch.mean(logits_fake_recon) - torch.mean(logits_fake_sample)
+        g_loss = -torch.mean(logits_fake_recon)
 
         disc_weight = torch.tensor(0.0)
         if global_step > self.disc_start:
@@ -267,7 +266,7 @@ class LPIPSWithDiscriminator(nn.Module):
         
         return loss, log
     
-    def discriminator_loss(self, x, recon_x, generated, global_step):
+    def discriminator_loss(self, x, generated, global_step):
         default_return = torch.tensor(0.0, requires_grad=True), {
             "d_loss": torch.tensor(0.0),
             "logits_real": torch.tensor(0.0),
@@ -277,9 +276,8 @@ class LPIPSWithDiscriminator(nn.Module):
         if global_step > self.disc_start:
             logits_real = self.discriminator(x.contiguous().detach())
             logits_fake = self.discriminator(generated.contiguous().detach())
-            logits_recon = self.discriminator(recon_x.contiguous().detach())
 
-            d_loss = self.disc_factor * (hinge_loss(logits_real, logits_fake) + hinge_loss(logits_real, logits_recon))
+            d_loss = self.disc_factor * hinge_loss(logits_real, logits_fake)
 
             log = {
                 "d_loss": d_loss.clone().detach().mean(),

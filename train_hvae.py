@@ -49,8 +49,8 @@ if __name__ == "__main__":
     datamodule = BRATSDataModule(**cfg.data)
         
     image_sampler_logger = ImageSampler(
-        n_samples=5, 
-        every_n_epochs=50,
+        n_samples=10, 
+        every_n_epochs=10,
         label='Image sampling',
     )
     
@@ -63,9 +63,9 @@ if __name__ == "__main__":
     # training
     trainer = pl.Trainer(
         logger=logger,
-        strategy="ddp_find_unused_parameters_true",
-        devices=4,
-        num_nodes=2,
+        # strategy="ddp_find_unused_parameters_true",
+        # devices=4,
+        # num_nodes=2,
         accelerator='gpu',
         precision=32,
         max_epochs=5000,

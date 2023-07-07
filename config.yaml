@@ -26,7 +26,7 @@ autoencoder:
     lr_d_factor:    1.0
     precision:      32
     loss:
-        disc_start:         50001
+        disc_start:         30001
         pixel_weight:       1.0
         perceptual_weight:  1.0
         disc_weight:        1.0
