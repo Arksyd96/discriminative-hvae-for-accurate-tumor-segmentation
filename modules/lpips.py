@@ -244,8 +244,9 @@ class LPIPSWithDiscriminator(nn.Module):
         # discriminator loss term
         real_labels = 1 - torch.rand(x.shape[0], 1).to(recon_x.device) * 0.01
 
-        logits_fake_recon = torch.sigmoid(self.discriminator(recon_x.contiguous()))
-        g_loss = F.binary_cross_entropy(logits_fake_recon, real_labels)
+        logits_fake_recon = self.discriminator(recon_x.contiguous())
+        # g_loss = F.binary_cross_entropy(logits_fake_recon, real_labels)
+        g_loss = -torch.mean(logits_fake_recon)
 
         disc_weight = torch.tensor(0.0)
         if global_step > self.disc_start:
@@ -276,14 +277,12 @@ class LPIPSWithDiscriminator(nn.Module):
         }
 
         if global_step > self.disc_start:
-            real_labels = 1 - torch.rand(x.shape[0], 1).to(x.device) * 0.01
-            fake_labels = torch.rand(x.shape[0], 1).to(generated.device) * 0.01
+            logits_real = self.discriminator(x.contiguous().detach())
+            logits_fake = self.discriminator(generated.contiguous().detach())
 
-            logits_real = torch.sigmoid(self.discriminator(x.contiguous().detach()))
-            logits_fake = torch.sigmoid(self.discriminator(generated.contiguous().detach()))
-
-            d_loss = F.binary_cross_entropy(logits_real, real_labels) + F.binary_cross_entropy(logits_fake, fake_labels)
-            d_loss = d_loss * self.disc_factor
+            # d_loss = F.binary_cross_entropy(logits_real, real_labels) + F.binary_cross_entropy(logits_fake, fake_labels)
+            # d_loss = -torch.mean(logits_real) + torch.mean(logits_fake)
+            d_loss = self.disc_factor * hinge_loss(logits_real, logits_fake)
 
             log = {
                 "d_loss": d_loss.clone().detach().mean(),
