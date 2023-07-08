@@ -1,6 +1,6 @@
 data:
     target_shape:   [64, 128, 128]
-    n_samples:      50
+    n_samples:      100
     modalities:     ['flair', 'seg']
     binarize:       true
     npy_path:       ./data/brats_preprocessed.npy
@@ -10,13 +10,13 @@ data:
     num_workers:    6
 autoencoder:
     input_shape:    [2, 128, 128] # channels, height, width
-    z_channels:     3  
+    z_channels:     4  
     pemb_dim:       # None
     max_period:     64
     num_channels:   128
     channels_mult:  [1, 2, 4, 4] # => after downsampling [64, 32, 16, 16]
-    num_res_blocks: 2
-    attn:           [false, false, false, true]
+    num_res_blocks: 1
+    attn:           [false, false, true, false]
     n_lf:           3
     eps_lf:         0.001
     beta_zero:      0.3
@@ -26,7 +26,7 @@ autoencoder:
     lr_d_factor:    1.0
     precision:      32
     loss:
-        disc_start:         30001
+        disc_start:         15001
         pixel_weight:       0.5
         perceptual_weight:  1.0
         disc_weight:        1.0

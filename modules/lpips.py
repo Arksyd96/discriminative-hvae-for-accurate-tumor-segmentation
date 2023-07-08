@@ -225,44 +225,30 @@ class LPIPSWithDiscriminator(nn.Module):
         disc_weight = disc_weight * self.disc_weight
         return disc_weight
     
-    def autoencoder_loss(self, x, recon_x, global_step, last_layer=None, weights=None, split='train'):
-        # l1_loss
+    def autoencoder_loss(self, x, recon_x, global_step, last_layer=None, split='train'):
         l1_loss = F.l1_loss(recon_x, x, reduction='none') * self.pixel_weight
-
-        # perceptual loss
-        p_loss = self.lpips(x, recon_x)
-        rec_loss = l1_loss + p_loss * self.perceptual_weight
-        nll_loss = rec_loss / torch.exp(self.logvar) + self.logvar
-
-        weighted_nll_loss = nll_loss
-        if weights is not None:
-            weighted_nll_loss = nll_loss * weights
-
-        weighted_nll_loss = torch.sum(weighted_nll_loss) / weighted_nll_loss.shape[0]
-        nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
+        p_loss = self.lpips(x, recon_x) * self.perceptual_weight
+        
+        rec_loss = l1_loss + p_loss 
+        rec_loss = torch.sum(rec_loss) / rec_loss.shape[0]
 
         # discriminator loss term
-        real_labels = 1 - torch.rand(x.shape[0], 1).to(recon_x.device) * 0.01
-
-        logits_fake_recon = self.discriminator(recon_x.contiguous())
-        # g_loss = F.binary_cross_entropy(logits_fake_recon, real_labels)
-        g_loss = -torch.mean(logits_fake_recon)
-
         disc_weight = torch.tensor(0.0)
         if global_step > self.disc_start:
-            disc_weight = self.calculate_adaptive_weight(nll_loss, g_loss, last_layer)
+            disc_weight = self.calculate_adaptive_weight(rec_loss, g_loss, last_layer)
+            
+        logits_recon = self.discriminator(recon_x.contiguous())
+        g_loss = -torch.mean(logits_recon) * disc_weight
             
         # compute total loss
-        loss = weighted_nll_loss + g_loss * disc_weight
+        loss = rec_loss + g_loss 
 
         split = split + '/' if split != 'train' else ''
         log = {
-            "{}total_auxilary_loss".format(split): loss.clone().detach().mean(),
+            "{}auxilary_loss".format(split): loss.clone().detach().mean(),
             "{}l1_loss".format(split): l1_loss.detach().mean(),
             "{}p_loss".format(split): p_loss.detach().mean(),
             "{}rec_loss".format(split): rec_loss.detach().mean(), # L1 + p_loss
-            "{}nll_loss".format(split): nll_loss.detach().mean(),
-            "{}logvar".format(split): self.logvar.detach().mean(),
             "{}disc_weight".format(split): disc_weight.detach(),
             "{}g_loss".format(split): g_loss.detach().mean(),
         }
@@ -280,8 +266,6 @@ class LPIPSWithDiscriminator(nn.Module):
             logits_real = self.discriminator(x.contiguous().detach())
             logits_fake = self.discriminator(generated.contiguous().detach())
 
-            # d_loss = F.binary_cross_entropy(logits_real, real_labels) + F.binary_cross_entropy(logits_fake, fake_labels)
-            # d_loss = -torch.mean(logits_real) + torch.mean(logits_fake)
             d_loss = self.disc_factor * hinge_loss(logits_real, logits_fake)
 
             log = {
