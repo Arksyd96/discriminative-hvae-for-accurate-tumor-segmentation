@@ -210,7 +210,9 @@ class LPIPSWithDiscriminator(nn.Module):
         
         # modules
         self.lpips = LPIPS().eval()
-        self.discriminator = NLayerDiscriminator(disc_input_channels, disc_channels, disc_num_layers, use_actnorm=False).apply(weights_init)
+        self.discriminator = NLayerDiscriminator(
+            disc_input_channels, disc_channels, disc_num_layers, use_actnorm=False
+        ).apply(weights_init)
 
     def calculate_adaptive_weight(self, rec_loss, g_loss, last_layer=None):
         if last_layer is not None:
@@ -234,16 +236,17 @@ class LPIPSWithDiscriminator(nn.Module):
 
         # discriminator loss term
         logits_recon = self.discriminator(recon_x.contiguous())
-        g_loss = -torch.mean(logits_recon) 
+        
+        valid = torch.ones_like(logits_recon) - torch.rand_like(logits_recon) * 0.05
+        g_loss = F.mse_loss(logits_recon, valid)
         
         disc_weight = torch.tensor(0.0)
-        if global_step > self.disc_start:
+        if last_layer is not None:
             disc_weight = self.calculate_adaptive_weight(rec_loss, g_loss, last_layer)
-            
-        g_loss = g_loss * disc_weight
+            g_loss = g_loss * disc_weight
             
         # compute total loss
-        loss = rec_loss + g_loss 
+        loss = rec_loss +  g_loss * self.disc_factor 
 
         split = split + '/' if split != 'train' else ''
         log = {
@@ -267,8 +270,14 @@ class LPIPSWithDiscriminator(nn.Module):
         if global_step > self.disc_start:
             logits_real = self.discriminator(x.contiguous().detach())
             logits_fake = self.discriminator(generated.contiguous().detach())
-
-            d_loss = self.disc_factor * hinge_loss(logits_real, logits_fake)
+            
+            valid = torch.ones_like(logits_real) - torch.rand_like(logits_real) * 0.05
+            fake = torch.rand_like(logits_fake) * 0.05
+            
+            real_loss = F.mse_loss(logits_real, valid)
+            fake_loss = F.mse_loss(logits_fake, fake)
+            
+            d_loss = 0.5 * (real_loss + fake_loss) * self.disc_factor
 
             log = {
                 "d_loss": d_loss.clone().detach().mean(),

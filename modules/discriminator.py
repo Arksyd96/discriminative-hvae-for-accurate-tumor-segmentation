@@ -4,6 +4,7 @@
 
 import functools
 import torch.nn as nn
+import torch
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -63,4 +64,7 @@ class NLayerDiscriminator(nn.Module):
 
     def forward(self, input):
         """Standard forward."""
-        return self.main(input)
+        logits = self.main(input)
+        logits = logits.mean(dim=[1, 2, 3])
+        return logits
+        

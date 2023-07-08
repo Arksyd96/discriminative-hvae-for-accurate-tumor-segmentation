@@ -105,7 +105,7 @@ class BRATSDataModule(pl.LightningDataModule):
 
         # balancing the dataset according to the size of the tumors
         max_tumor_size = data[:, 1].sum(dim=(1, 2)).max()
-        bins = np.arange(0, max_tumor_size, 25) # 25 is the bin size
+        bins = np.arange(100, max_tumor_size, 25) # 25 is the bin size
         slices_per_level = self.hparams.n_samples * D // len(bins) 
         print('Max tumor size: {}, Slices per level: {}, Bins: {}'.format(max_tumor_size, slices_per_level, len(bins)))
 
