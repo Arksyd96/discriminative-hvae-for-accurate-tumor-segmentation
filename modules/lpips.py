@@ -233,12 +233,14 @@ class LPIPSWithDiscriminator(nn.Module):
         rec_loss = torch.sum(rec_loss) / rec_loss.shape[0]
 
         # discriminator loss term
+        logits_recon = self.discriminator(recon_x.contiguous())
+        g_loss = -torch.mean(logits_recon) 
+        
         disc_weight = torch.tensor(0.0)
         if global_step > self.disc_start:
             disc_weight = self.calculate_adaptive_weight(rec_loss, g_loss, last_layer)
             
-        logits_recon = self.discriminator(recon_x.contiguous())
-        g_loss = -torch.mean(logits_recon) * disc_weight
+        g_loss = g_loss * disc_weight
             
         # compute total loss
         loss = rec_loss + g_loss 
