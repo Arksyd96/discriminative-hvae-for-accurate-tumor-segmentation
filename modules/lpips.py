@@ -236,12 +236,14 @@ class LPIPSWithDiscriminator(nn.Module):
 
         # discriminator loss term
         logits_recon = self.discriminator(recon_x.contiguous())
-        
-        valid = torch.ones_like(logits_recon) - torch.rand_like(logits_recon) * 0.05
-        g_loss = F.mse_loss(logits_recon, valid)
+        g_loss = -torch.mean(logits_recon)
+
+        # lsgan style
+        # valid = torch.ones_like(logits_recon) - torch.rand_like(logits_recon) * 0.05
+        # g_loss = F.mse_loss(logits_recon, valid)
         
         disc_weight = torch.tensor(0.0)
-        if last_layer is not None:
+        if last_layer is not None and global_step > self.disc_start:
             disc_weight = self.calculate_adaptive_weight(rec_loss, g_loss, last_layer)
             g_loss = g_loss * disc_weight
             
@@ -270,14 +272,17 @@ class LPIPSWithDiscriminator(nn.Module):
         if global_step > self.disc_start:
             logits_real = self.discriminator(x.contiguous().detach())
             logits_fake = self.discriminator(generated.contiguous().detach())
+
+            d_loss = self.disc_factor * hinge_loss(logits_real, logits_fake)
+
+            # ls-gan style
+            # valid = torch.ones_like(logits_real) - torch.rand_like(logits_real) * 0.05
+            # fake = torch.rand_like(logits_fake) * 0.05
             
-            valid = torch.ones_like(logits_real) - torch.rand_like(logits_real) * 0.05
-            fake = torch.rand_like(logits_fake) * 0.05
+            # real_loss = F.mse_loss(logits_real, valid)
+            # fake_loss = F.mse_loss(logits_fake, fake)
             
-            real_loss = F.mse_loss(logits_real, valid)
-            fake_loss = F.mse_loss(logits_fake, fake)
-            
-            d_loss = 0.5 * (real_loss + fake_loss) * self.disc_factor
+            # d_loss = 0.5 * (real_loss + fake_loss) * self.disc_factor
 
             log = {
                 "d_loss": d_loss.clone().detach().mean(),

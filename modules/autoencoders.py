@@ -407,7 +407,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         # Optimize Autoencoder #
         ########################
         hvae_loss = self.loss_function(recon_x, x, z, rho, eps0, logvar)
-        generated = self.sample_img(n_samples=x.shape[0])
 
         reg_loss, reg_log = self.regularization.autoencoder_loss(
             x, recon_x, self.global_step, last_layer=self.decoder.out_conv[-1].weight
@@ -422,6 +421,8 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         ##########################
         # Optimize Discriminator #
         ##########################
+        generated = self.sample_img(n_samples=x.shape[0])
+
         disc_loss, disc_log = self.regularization.discriminator_loss(x, generated, self.global_step)
         disc_opt.zero_grad(set_to_none=True)
         self.manual_backward(disc_loss)

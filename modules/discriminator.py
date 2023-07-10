@@ -64,7 +64,5 @@ class NLayerDiscriminator(nn.Module):
 
     def forward(self, input):
         """Standard forward."""
-        logits = self.main(input)
-        logits = logits.mean(dim=[1, 2, 3])
-        return logits
+        return self.main(input)
         
