@@ -235,8 +235,10 @@ class LPIPSWithDiscriminator(nn.Module):
         rec_loss = torch.sum(rec_loss) / rec_loss.shape[0]
 
         # discriminator loss term
-        logits_recon = self.discriminator(recon_x.contiguous())
-        g_loss = -torch.mean(logits_recon)
+        g_loss = torch.tensor(0.0, requires_grad=True)
+        if global_step > self.disc_start:    
+            logits_recon = self.discriminator(recon_x.contiguous())
+            g_loss = -torch.mean(logits_recon)
 
         # lsgan style
         # valid = torch.ones_like(logits_recon) - torch.rand_like(logits_recon) * 0.05

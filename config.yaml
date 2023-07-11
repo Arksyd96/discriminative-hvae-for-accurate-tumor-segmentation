@@ -14,9 +14,9 @@ autoencoder:
     pemb_dim:       # None
     max_period:     64 # not used
     num_channels:   128
-    channels_mult:  [1, 3, 4] # => after downsampling [64, 32, 32]
+    channels_mult:  [1, 2, 4, 4] # => after downsampling [64, 32, 32]
     num_res_blocks: 2
-    attn:           [false, false, true]
+    attn:           [false, false, false, true]
     n_lf:           3
     eps_lf:         0.001
     beta_zero:      0.3
