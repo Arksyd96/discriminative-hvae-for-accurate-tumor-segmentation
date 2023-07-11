@@ -421,15 +421,16 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
         ##########################
         # Optimize Discriminator #
         ##########################
-        generated = self.sample_img(n_samples=x.shape[0])
+        # generated = self.sample_img(n_samples=x.shape[0])
 
-        disc_loss, disc_log = self.regularization.discriminator_loss(x, generated, self.global_step)
+        disc_loss, disc_log = self.regularization.discriminator_loss(x, recon_x, self.global_step)
         disc_opt.zero_grad(set_to_none=True)
         self.manual_backward(disc_loss)
         disc_opt.step()
         # disc_scheduler.step()
 
         # logging
+        self.log('total_loss', ae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log('hvae_loss', hvae_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log_dict(reg_log, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log_dict(disc_log, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
