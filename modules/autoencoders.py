@@ -10,7 +10,6 @@ from .base import (
     ResidualBlock, SelfAttention
 )
 from .lpips import LPIPSWithDiscriminator
-from .losses import dice_loss
 
 class Encoder(nn.Module):
     def __init__(
@@ -295,7 +294,6 @@ class HamiltonianAutoencoder(VariationalAutoencoder, pl.LightningModule):
             self, input_shape, z_channels, pemb_dim, num_channels, channels_mult, num_res_blocks, attn
         )
         
-            
         self.positional_encoder = TimePositionalEmbedding(pemb_dim, max_period) if pemb_dim is not None else nn.Identity()
 
         self.vae_forward = super().forward

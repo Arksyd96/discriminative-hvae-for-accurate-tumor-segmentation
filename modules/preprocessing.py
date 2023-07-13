@@ -118,12 +118,12 @@ class BRATSDataModule(pl.LightningDataModule):
             else:
                 data_balanced = torch.cat([data_balanced, curr_bin], dim=0)
 
-        # fill the empty space with random slices that have at least a tumor size of 400
-        if data_balanced.shape[0] < self.hparams.n_samples * D:
-            n_samples = self.hparams.n_samples * D - data_balanced.shape[0]
-            random_samples = data[(data[:, 1].sum(dim=(1, 2)) >= 400)]
-            random_samples = random_samples[torch.randperm(random_samples.shape[0])][:n_samples]
-            data_balanced = torch.cat([data_balanced, random_samples], dim=0)
+        # # fill the empty space with random slices that have at least a tumor size of 400
+        # if data_balanced.shape[0] < self.hparams.n_samples * D:
+        #     n_samples = self.hparams.n_samples * D - data_balanced.shape[0]
+        #     random_samples = data[(data[:, 1].sum(dim=(1, 2)) >= 400)]
+        #     random_samples = random_samples[torch.randperm(random_samples.shape[0])][:n_samples]
+        #     data_balanced = torch.cat([data_balanced, random_samples], dim=0)
 
         print('Train shape:', data_balanced.shape) 
         print('Min: {}, Max: {}'.format(data_balanced.min(), data_balanced.max()))
