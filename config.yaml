@@ -1,6 +1,6 @@
 data:
     target_shape:   [64, 128, 128]
-    n_samples:      100
+    n_samples:      25
     modalities:     ['flair', 'seg']
     binarize:       true
     npy_path:       ./data/brats_preprocessed.npy
@@ -26,14 +26,14 @@ autoencoder:
     lr_d_factor:    1.0
     precision:      32
     loss:
-        disc_start:         10000001
+        disc_start:         30001
         pixel_weight:       1.0
         perceptual_weight:  1.0
-        disc_weight:        0.0
+        disc_weight:        1.0
         disc_input_channels: 2
         disc_channels:      64
         disc_num_layers:    3
-        disc_factor:        0.0
+        disc_factor:        1.0
         logvar_init:        0.0
 callbacks:
     checkpoint:
