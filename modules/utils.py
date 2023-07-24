@@ -49,3 +49,31 @@ def compute_divergence(real_masks, generated_masks):
     kld = entropy(p_real.T, p_generated.T)
 
     return jsd, kld     
+
+
+def inset_zoom_plot(images, bbox, label=''):
+    plt.figure(figsize=(10, 20))
+    for idx in range(images.shape[0]):
+        ax = plt.subplot(1, 4, idx + 1)
+        ax.imshow(np.rot90(images[idx]), cmap='gray')
+        plt.axis('off')
+
+        # Add a colored rectangle around the area of interest
+        x, y = bbox[idx]
+        rect = plt.Rectangle((x, y), 20, 20, linewidth=2, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+
+        # Add a zoomed-in image of the area of interest
+        axins = ax.inset_axes([0.54, 0.59, 0.5, 0.4])
+        axins.imshow(np.rot90(images[idx])[y:y + 20, x:x + 20], cmap='gray')
+        axins.set_xticks([])
+        axins.set_yticks([])
+        axins.spines['top'].set_color('r')
+        axins.spines['right'].set_color('r')
+        axins.spines['bottom'].set_color('r')
+        axins.spines['left'].set_color('r')
+        axins.spines['top'].set_linewidth(2)
+        axins.spines['right'].set_linewidth(2)
+        axins.spines['bottom'].set_linewidth(2)
+        axins.spines['left'].set_linewidth(2)
+    plt.show()
